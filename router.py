@@ -37,18 +37,17 @@ async def route_message(user_text: str) -> str:
             context += "\n\n" + format_alerts(alerts)
         return await ask_groq(user_text, context)
 
-    # Aggiungi evento
-    add_keywords = ["aggiungi", "aggiungi evento", "segna", "metti in calendario", "crea evento", "prenota", "nuovo evento"]
-    if any(w in text_lower for w in add_keywords):
-        return await handle_add_event(user_text)
+    # Azioni calendario (aggiungi / elimina / misto)
+    add_kw = ["aggiungi", "segna", "metti in calendario", "crea", "prenota", "nuovo evento"]
+    del_kw = ["elimina", "cancella", "rimuovi", "togli"]
+    has_add = any(w in text_lower for w in add_kw)
+    has_del = any(w in text_lower for w in del_kw)
 
-    # Elimina evento
-    del_keywords = ["elimina", "cancella", "rimuovi", "togli", "delete"]
-    if any(w in text_lower for w in del_keywords) and any(w in text_lower for w in ["event", "appuntament", "impegn"]):
-        return await handle_delete_event(user_text)
+    if has_add or has_del:
+        return await handle_calendar_action(user_text)
 
     # Mostra calendario
-    cal_keywords = ["impegn", "calendar", "agenda", "appuntament", "event", "settiman", "da fare", "ho da", "cosa faccio", "cosa ho"]
+    cal_keywords = ["impegn", "calendar", "agenda", "appuntament", "settiman", "da fare", "ho da", "cosa faccio", "cosa ho"]
     if any(w in text_lower for w in cal_keywords):
         events = await get_events(days_ahead=7)
         return format_events(events)
@@ -97,7 +96,7 @@ Testo: {user_text}"""
     return json.loads(raw[start:end])
 
 
-async def handle_add_event(user_text: str) -> str:
+async def handle_calendar_action(user_text: str) -> str:
     try:
         actions = await _extract_events_from_text(user_text)
         results = []
@@ -109,22 +108,7 @@ async def handle_add_event(user_text: str) -> str:
                 results.append(await delete_event_by_title(a["title"]))
         return "\n".join(results) if results else "Nessuna azione eseguita."
     except Exception:
-        return "Non ho capito. Scrivi tipo: 'aggiungi dentista venerdì alle 10'"
-
-
-async def handle_delete_event(user_text: str) -> str:
-    try:
-        actions = await _extract_events_from_text(user_text)
-        results = []
-        for a in actions:
-            if a["action"] == "delete":
-                results.append(await delete_event_by_title(a["title"]))
-            elif a["action"] == "add":
-                dt = datetime.strptime(f"{a['date']} {a['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
-                results.append(await add_event(a["title"], dt))
-        return "\n".join(results) if results else "Nessun evento trovato."
-    except Exception:
-        return "Non ho capito quale evento eliminare."
+        return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
 
 
 async def ask_groq(user_text: str, context: str = "") -> str:
