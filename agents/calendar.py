@@ -56,6 +56,38 @@ async def add_event(title: str, start_dt: datetime, end_dt: datetime = None) -> 
     return f"Errore creazione evento: {r.status_code}"
 
 
+async def rename_event(old_title: str, new_title: str) -> str:
+    token = await _get_access_token()
+    if not token:
+        return "Credenziali Google Calendar non configurate."
+
+    now = datetime.now(ROME).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.get(
+            f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"q": old_title, "timeMin": now, "maxResults": 5, "singleEvents": True},
+        )
+
+    items = r.json().get("items", [])
+    if not items:
+        return f"Nessun evento trovato con '{old_title}'."
+
+    ev = items[0]
+    ev_id = ev["id"]
+
+    async with httpx.AsyncClient(timeout=10) as c:
+        r2 = await c.patch(
+            f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events/{ev_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"summary": new_title},
+        )
+
+    if r2.status_code == 200:
+        return f"✏️ Rinominato: *{old_title}* → *{new_title}*"
+    return f"Errore rinomina: {r2.status_code}"
+
+
 async def delete_event_by_title(title_fragment: str) -> str:
     token = await _get_access_token()
     if not token:

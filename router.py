@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts
 from agents.news import get_morning_briefing
-from agents.calendar import get_events, format_events, add_event, delete_event_by_title
+from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -40,10 +40,12 @@ async def route_message(user_text: str) -> str:
     # Azioni calendario (aggiungi / elimina / misto)
     add_kw = ["aggiungi", "segna", "metti in calendario", "crea", "prenota", "nuovo evento"]
     del_kw = ["elimina", "cancella", "rimuovi", "togli"]
+    mod_kw = ["modifica", "rinomina", "cambia nome", "aggiorna", "sposta"]
     has_add = any(w in text_lower for w in add_kw)
     has_del = any(w in text_lower for w in del_kw)
+    has_mod = any(w in text_lower for w in mod_kw)
 
-    if has_add or has_del:
+    if has_add or has_del or has_mod:
         return await handle_calendar_action(user_text)
 
     # Mostra calendario
@@ -67,8 +69,10 @@ async def _extract_events_from_text(user_text: str) -> list[dict]:
 
 Analizza il testo e restituisci un array JSON con tutte le azioni da eseguire.
 Ogni azione ha:
-- "action": "add" o "delete"
-- "title": il nome COMPLETO dell'evento (tutte le parole che lo descrivono, non solo la prima)
+- "action": "add", "delete" o "rename"
+- "title": nome COMPLETO dell'evento (per add/delete)
+- "old_title": nome attuale (solo per rename)
+- "new_title": nuovo nome (solo per rename)
 - "date": "YYYY-MM-DD" (solo per add)
 - "time": "HH:MM" (solo per add, default "09:00" se non specificato)
 
@@ -76,9 +80,10 @@ Interpreta date relative in italiano (oggi, domani, lunedì, ecc.).
 Rispondi SOLO con il JSON array, zero altro testo.
 
 Esempi:
-- "aggiungi dentista domani alle 10" → [{{"action":"add","title":"dentista","date":"2026-06-25","time":"10:00"}}]
+- "aggiungi dentista domani alle 10" → [{{"action":"add","title":"dentista","date":"{(today + timedelta(days=1)).strftime('%Y-%m-%d')}","time":"10:00"}}]
 - "elimina riunione e aggiungi palestra venerdì alle 18" → [{{"action":"delete","title":"riunione"}},{{"action":"add","title":"palestra","date":"2026-06-27","time":"18:00"}}]
-- "aggiungi arriva ci oggi alle 17:30" → [{{"action":"add","title":"arriva ci","date":"2026-06-24","time":"17:30"}}]
+- "modifica nome da vecchio nome a nuovo nome" → [{{"action":"rename","old_title":"vecchio nome","new_title":"nuovo nome"}}]
+- "rinomina dentista in visita medica" → [{{"action":"rename","old_title":"dentista","new_title":"visita medica"}}]
 
 Testo: {user_text}"""
 
@@ -106,6 +111,8 @@ async def handle_calendar_action(user_text: str) -> str:
                 results.append(await add_event(a["title"], dt))
             elif a["action"] == "delete":
                 results.append(await delete_event_by_title(a["title"]))
+            elif a["action"] == "rename":
+                results.append(await rename_event(a["old_title"], a["new_title"]))
         return "\n".join(results) if results else "Nessuna azione eseguita."
     except Exception:
         return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
