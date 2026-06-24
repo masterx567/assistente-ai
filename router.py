@@ -33,13 +33,14 @@ async def route_message(user_text: str) -> str:
             context += "\n\n" + format_alerts(alerts)
         return await ask_groq(user_text, context)
 
-    # Calendario
-    if any(w in text_lower for w in ["impegn", "calendar", "agenda", "appuntament", "event", "settiman", "domani", "oggi cosa"]):
+    # Calendario — va prima delle notizie
+    cal_keywords = ["impegn", "calendar", "agenda", "appuntament", "event", "settiman", "domani", "da fare", "ho da", "cosa faccio", "cosa ho"]
+    if any(w in text_lower for w in cal_keywords):
         events = await get_events(days_ahead=7)
         return format_events(events)
 
     # Notizie
-    if any(w in text_lower for w in ["notizi", "news", "succede", "aggiornament", "giornale"]):
+    if any(w in text_lower for w in ["notizi", "news", "succede", "aggiornament", "giornale", "briefing"]):
         briefing = await get_morning_briefing()
         return briefing
 
