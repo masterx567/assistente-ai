@@ -77,6 +77,7 @@ Ogni azione ha:
 - "time": "HH:MM" (solo per add, default "09:00" se non specificato)
 
 Interpreta date relative in italiano (oggi, domani, lunedì, ecc.).
+IMPORTANTE: le parole "impegno", "evento", "appuntamento" sono parole generiche, NON fanno parte del titolo. Ignorale nel titolo.
 Rispondi SOLO con il JSON array, zero altro testo.
 
 Esempi:
