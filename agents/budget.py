@@ -13,11 +13,29 @@ HEADERS = {
 }
 
 
+async def _get_all_category_names() -> dict[str, str]:
+    """Ritorna dict {category_page_id: name} con una sola chiamata."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"https://api.notion.com/v1/databases/{DB_CATEGORIES}/query",
+            headers=HEADERS, json={"page_size": 100}
+        )
+    result = {}
+    for c in r.json().get("results", []):
+        name_parts = c["properties"].get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else ""
+        if name:
+            result[c["id"]] = name
+    return result
+
+
 async def get_monthly_spending() -> dict:
     """Ritorna spese mese corrente per categoria."""
     now = datetime.now()
     start = f"{now.year}-{now.month:02d}-01"
     end = f"{now.year}-{now.month:02d}-{_last_day(now.year, now.month):02d}"
+
+    cat_names = await _get_all_category_names()
 
     body = {
         "filter": {
@@ -32,7 +50,7 @@ async def get_monthly_spending() -> dict:
 
     transactions = []
     cursor = None
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         while True:
             if cursor:
                 body["start_cursor"] = cursor
@@ -51,9 +69,7 @@ async def get_monthly_spending() -> dict:
         props = t["properties"]
         amount = props.get("amount", {}).get("number", 0) or 0
         cat_rel = props.get("category", {}).get("relation", [])
-        cat_name = "Senza categoria"
-        if cat_rel:
-            cat_name = await _get_category_name(cat_rel[0]["id"])
+        cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
         spending[cat_name] = spending.get(cat_name, 0) + abs(amount)
 
     return spending
