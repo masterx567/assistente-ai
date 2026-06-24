@@ -1,6 +1,7 @@
 import httpx
 import os
 from datetime import datetime
+from agents.calendar import get_today_events
 
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
@@ -56,5 +57,9 @@ async def get_morning_briefing(topics: list[str] = None) -> str:
         count += 1
         if count >= 7:
             break
+
+    today_events = await get_today_events()
+    if today_events:
+        lines.append(f"\n{today_events}")
 
     return "\n".join(lines)

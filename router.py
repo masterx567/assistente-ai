@@ -2,6 +2,7 @@ import httpx
 import os
 from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts
 from agents.news import get_morning_briefing
+from agents.calendar import get_events, format_events
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -32,8 +33,13 @@ async def route_message(user_text: str) -> str:
             context += "\n\n" + format_alerts(alerts)
         return await ask_groq(user_text, context)
 
+    # Calendario
+    if any(w in text_lower for w in ["impegn", "calendar", "agenda", "appuntament", "event", "settiman", "domani", "oggi cosa"]):
+        events = await get_events(days_ahead=7)
+        return format_events(events)
+
     # Notizie
-    if any(w in text_lower for w in ["notizi", "news", "oggi", "succede", "aggiornament", "giornale"]):
+    if any(w in text_lower for w in ["notizi", "news", "succede", "aggiornament", "giornale"]):
         briefing = await get_morning_briefing()
         return briefing
 
