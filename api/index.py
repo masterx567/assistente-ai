@@ -31,6 +31,14 @@ def root():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/debug")
+def debug():
+    import router as r_module
+    import inspect
+    src = inspect.getsource(r_module.route_message)
+    return jsonify({"router_keywords": src[:500], "ical": os.getenv("GOOGLE_CALENDAR_ICAL_URL", "NOT SET")[:50]})
+
+
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
@@ -39,7 +47,10 @@ def webhook():
     text = message.get("text", "").strip()
 
     if text and chat_id == TELEGRAM_CHAT_ID:
-        reply = asyncio.run(route_message(text))
+        try:
+            reply = asyncio.run(route_message(text))
+        except Exception as e:
+            reply = f"Errore: {str(e)}"
         send_telegram(reply)
 
     return jsonify({"ok": True})
