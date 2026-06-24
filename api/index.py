@@ -124,6 +124,62 @@ def evening():
     return jsonify({"ok": True})
 
 
+@app.route("/api/tick")
+def tick():
+    """Job unico ogni 30 min — gestisce morning, evening e reminders."""
+    now = datetime.now(ROME)
+    h, m = now.hour, now.minute
+    done = []
+
+    # Briefing mattutino: 07:45–08:15
+    if h == 8 and m <= 15 or (h == 7 and m >= 45):
+        briefing = asyncio.run(get_morning_briefing())
+        send_telegram(briefing)
+        done.append("morning")
+
+    # Budget serale: 19:45–20:15
+    if h == 20 and m <= 15 or (h == 19 and m >= 45):
+        alerts = asyncio.run(get_budget_alerts())
+        if alerts:
+            send_telegram(format_alerts(alerts))
+        done.append("evening")
+
+    # Reminders eventi
+    done.extend(_check_reminders(now))
+
+    return jsonify({"ok": True, "done": done})
+
+
+def _check_reminders(now: datetime) -> list[str]:
+    events = get_upcoming_events(hours_ahead=26)
+    sent = []
+    h, m = now.hour, now.minute
+    total_min = h * 60 + m
+
+    for ev in events:
+        start = ev["start"]
+        title = ev["title"]
+        minutes_until = (start - now).total_seconds() / 60
+
+        # Giorno prima alle 20:00 ± 15 min
+        tomorrow = (now + timedelta(days=1)).date()
+        if start.date() == tomorrow and 19 * 60 + 45 <= total_min <= 20 * 60 + 15:
+            send_telegram(f"📅 Domani alle *{start.strftime('%H:%M')}*: *{title}*")
+            sent.append(f"day_before:{title}")
+
+        # 2 ore prima: 105–135 min
+        elif 105 <= minutes_until <= 135:
+            send_telegram(f"⏰ Tra 2 ore: *{title}* alle {start.strftime('%H:%M')}")
+            sent.append(f"2h:{title}")
+
+        # 1 ora prima: 45–75 min
+        elif 45 <= minutes_until <= 75:
+            send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
+            sent.append(f"1h:{title}")
+
+    return sent
+
+
 @app.route("/api/reminders")
 def reminders():
     now = datetime.now(ROME)
