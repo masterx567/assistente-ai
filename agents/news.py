@@ -5,12 +5,18 @@ from datetime import datetime
 from agents.calendar import get_today_events
 from agents.budget import get_budget_alerts, format_alerts
 
-AI_KW = ["intelligenza artificiale", "ai ", " ai,", "chatgpt", "openai", "anthropic", "llm", "machine learning", "deep learning", "gemini", "copilot"]
+FILTERS = {
+    "ai":       ["intelligenza artificiale", "chatgpt", "openai", "anthropic", "llm", "machine learning", "deep learning", "gemini", "copilot", "claude", "modello ai", "robot", " ai "],
+    "tech":     ["apple", "google", "microsoft", "meta", "smartphone", "app ", "software", "hardware", "iphone", "android", "chip", "processore", "nvidia", "amd"],
+    "politica": ["governo", "parlamento", "senato", "camera", "meloni", "elezioni", "partito", "ministro", "decreto", "legge", "pd ", "lega ", "m5s", "fratelli d'italia"],
+    "finanza":  ["borsa", "mercati", "inflazione", "pil", "spread", "bce", "banca", "azioni", "investimenti", "euro", "dollaro", "petrolio", "tassi", "titoli"],
+}
 
 RSS_FEEDS = [
-    ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", "tech"),
-    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", "politica"),
-    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", "finanza"),
+    ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", ["ai", "tech"]),
+    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", ["politica"]),
+    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", ["finanza"]),
+    ("https://www.wired.it/rss", ["ai", "tech"]),
 ]
 
 
@@ -40,13 +46,15 @@ async def get_morning_briefing() -> str:
     # 2. Notizie RSS
     lines.append("📰 *Notizie importanti*")
 
-    ai_articles = []
-    tech_articles = []
-    pol_articles = []
-    fin_articles = []
+    ai_articles: list = []
+    tech_articles: list = []
+    pol_articles: list = []
+    fin_articles: list = []
+
+    buckets = {"ai": ai_articles, "tech": tech_articles, "politica": pol_articles, "finanza": fin_articles}
 
     async with httpx.AsyncClient(timeout=15) as client:
-        for url, category in RSS_FEEDS:
+        for url, categories in RSS_FEEDS:
             try:
                 r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
                 items = _parse_rss(r.text) if r.status_code == 200 else []
@@ -55,15 +63,10 @@ async def get_morning_briefing() -> str:
 
             for item in items:
                 t_lower = item["title"].lower()
-                if category == "tech":
-                    if any(kw in t_lower for kw in AI_KW):
-                        ai_articles.append(item)
-                    else:
-                        tech_articles.append(item)
-                elif category == "politica":
-                    pol_articles.append(item)
-                elif category == "finanza":
-                    fin_articles.append(item)
+                for cat in categories:
+                    if any(kw in t_lower for kw in FILTERS[cat]):
+                        buckets[cat].append(item)
+                        break
 
     sections = [
         ("🤖 AI", ai_articles),

@@ -273,11 +273,23 @@ def format_events(events: list[dict], days_ahead: int = 7) -> str:
 
 
 async def get_today_events() -> str:
-    events = await get_events(days_ahead=0)
+    from datetime import date
+    events = await get_events(days_ahead=1)
     if not events:
         return ""
-    lines = ["📅 *Oggi:*"]
-    for ev in events:
-        time_str = f" {ev['time']}" if ev.get("time") else ""
-        lines.append(f"• {ev['title']}{time_str}")
-    return "\n".join(lines)
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    today_evs = [e for e in events if e["date"] == today]
+    tomorrow_evs = [e for e in events if e["date"] == tomorrow]
+    lines = []
+    if today_evs:
+        lines.append("📅 *Oggi:*")
+        for ev in today_evs:
+            time_str = f" {ev['time']}" if ev.get("time") else ""
+            lines.append(f"• {ev['title']}{time_str}")
+    if tomorrow_evs:
+        lines.append("📅 *Domani:*")
+        for ev in tomorrow_evs:
+            time_str = f" {ev['time']}" if ev.get("time") else ""
+            lines.append(f"• {ev['title']}{time_str}")
+    return "\n".join(lines) if lines else ""
