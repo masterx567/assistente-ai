@@ -116,6 +116,15 @@ def morning():
     return jsonify({"ok": True})
 
 
+@app.route("/api/test-morning")
+def test_morning():
+    """Test manuale briefing — chiama questo per verificare che funzioni."""
+    now = datetime.now(ROME)
+    briefing = asyncio.run(get_morning_briefing())
+    send_telegram(briefing)
+    return jsonify({"ok": True, "time": now.strftime("%H:%M"), "sent": True})
+
+
 @app.route("/api/evening")
 def evening():
     alerts = asyncio.run(get_budget_alerts())
@@ -131,8 +140,8 @@ def tick():
     h, m = now.hour, now.minute
     done = []
 
-    # Briefing mattutino: 07:45–08:15
-    if h == 8 and m <= 15 or (h == 7 and m >= 45):
+    # Briefing mattutino: 08:45–09:15
+    if (h == 9 and m <= 15) or (h == 8 and m >= 45):
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
