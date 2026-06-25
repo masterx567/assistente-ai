@@ -226,6 +226,12 @@ def _check_reminders(now: datetime) -> list[str]:
             send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"1h:{title}")
 
+        # Reminder imminente 🔔 (0–35 min): per promemoria rapidi da chat
+        elif 0 <= minutes_until <= 35 and title.startswith("🔔"):
+            reminder_text = title.replace("🔔 Ricorda: ", "").replace("🔔 ", "")
+            send_telegram(f"🔔 *{reminder_text}*")
+            sent.append(f"now:{title}")
+
     return sent
 
 

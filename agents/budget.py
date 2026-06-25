@@ -239,10 +239,15 @@ async def get_recent_transactions(limit: int = 10) -> list[dict]:
         props = t["properties"]
         amount = props.get("amount", {}).get("number", 0) or 0
         date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+        # Prova merchant_raw → merchant_normalized → Name (title)
         mr = props.get("merchant_raw", {}).get("rich_text", [])
-        name = mr[0]["plain_text"] if mr else props.get("Name", {}).get("title", [{}])[0].get("plain_text", "")
+        mn = props.get("merchant_normalized", {}).get("rich_text", [])
+        title_parts = props.get("Name", {}).get("title", [])
+        name = (mr[0]["plain_text"] if mr else
+                mn[0]["plain_text"] if mn else
+                title_parts[0]["plain_text"] if title_parts else "?")
         cat_rel = props.get("category", {}).get("relation", [])
-        cat = cat_names.get(cat_rel[0]["id"], "?") if cat_rel else "?"
+        cat = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
         results.append({"name": name, "amount": abs(amount), "date": date_str, "category": cat})
     return results
 
