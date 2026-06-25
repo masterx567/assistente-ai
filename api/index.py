@@ -213,13 +213,13 @@ def tick():
     done = []
 
     # Briefing mattutino: 09:00–09:06 (finestra stretta, 1 tick max)
-    if h == 9 and 0 <= m <= 6:
+    if h == 9 and 0 <= m <= 4:
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
 
     # Budget serale: 20:00–20:06
-    if h == 20 and 0 <= m <= 6:
+    if h == 20 and 0 <= m <= 4:
         alerts = asyncio.run(get_budget_alerts())
         if alerts:
             send_telegram(format_alerts(alerts))
@@ -269,7 +269,7 @@ def _check_reminders(now: datetime) -> list[str]:
 
         # Giorno prima: 20:00–20:06
         tomorrow = (now + timedelta(days=1)).date()
-        if start.date() == tomorrow and h == 20 and 0 <= m <= 6:
+        if start.date() == tomorrow and h == 20 and 0 <= m <= 4:
             send_telegram(f"📅 Domani alle *{start.strftime('%H:%M')}*: *{title}*")
             sent.append(f"day_before:{title}")
 
