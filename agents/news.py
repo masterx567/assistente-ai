@@ -9,30 +9,17 @@ from agents.budget import get_budget_alerts, format_alerts
 
 ROME = ZoneInfo("Europe/Rome")
 
-FILTERS = {
-    "ai":       ["intelligenza artificiale", "chatgpt", "openai", "anthropic", "llm", "machine learning",
-                 "deep learning", "gemini", "copilot", "claude", "modello ai", "robot", " ai ", "gpt",
-                 "neural", "algoritmo", "automazione", "ai.", "ia ", "ia,"],
-    "tech":     ["apple", "google", "microsoft", "meta", "smartphone", "software", "hardware",
-                 "iphone", "android", "chip", "processore", "nvidia", "amd", "samsung", "tesla",
-                 "tech", "digitale", "cybersicurezza", "hacker", "startup", "silicon"],
-    "politica": ["governo", "parlamento", "senato", "camera", "meloni", "elezioni", "partito",
-                 "ministro", "decreto", "legge", "pd ", "lega ", "m5s", "fratelli", "politica",
-                 "premier", "presidente", "voto", "coalizione", "opposizione"],
-    "finanza":  ["borsa", "mercati", "inflazione", "pil", "spread", "bce", "banca", "azioni",
-                 "investimenti", "euro", "dollaro", "petrolio", "tassi", "titoli", "economia",
-                 "finanza", "ftse", "nasdaq", "wall street", "recessione", "crescita"],
-}
+GN = "https://news.google.com/rss/search?hl=it&gl=IT&ceid=IT:it&q="
 
-# (url, categorie_keyword, categoria_fallback_se_nessun_match)
+# (url, bucket, usa_fallback)  — Google News RSS per topic specifici
 RSS_FEEDS = [
-    ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", ["ai", "tech"], "tech"),
-    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", ["politica"], "politica"),
-    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", ["finanza"], "finanza"),
-    ("https://www.corriere.it/rss/economia.xml", ["finanza"], "finanza"),
-    ("https://www.corriere.it/rss/tecnologia.xml", ["ai", "tech"], "tech"),
-    ("https://punto-informatico.it/feed/", ["ai", "tech"], "tech"),
-    ("https://www.hdblog.it/rss/", ["ai", "tech"], "tech"),
+    (GN + "intelligenza+artificiale+OR+ChatGPT+OR+OpenAI", "ai", True),
+    (GN + "politica+italiana+OR+governo+Meloni+OR+parlamento", "politica", True),
+    (GN + "borsa+Milano+OR+mercati+finanziari+OR+economia+italiana", "finanza", True),
+    (GN + "tecnologia+smartphone+OR+Apple+OR+Google+OR+Microsoft", "tech", True),
+    ("https://www.hdblog.it/rss/", "tech", True),
+    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", "politica", True),
+    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", "finanza", True),
 ]
 
 
@@ -80,31 +67,16 @@ async def get_morning_briefing() -> str:
     lines.append("━━━━━━━━━━━━━━━")
     lines.append("📰 *NOTIZIE*")
 
-    ai_articles: list = []
-    tech_articles: list = []
-    pol_articles: list = []
-    fin_articles: list = []
-    buckets = {"ai": ai_articles, "tech": tech_articles, "politica": pol_articles, "finanza": fin_articles}
+    buckets: dict = {"ai": [], "tech": [], "politica": [], "finanza": []}
 
     async with httpx.AsyncClient(timeout=15) as client:
-        for url, categories, fallback_cat in RSS_FEEDS:
+        for url, bucket, _ in RSS_FEEDS:
             try:
                 r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
                 items = _parse_rss(r.text, max_age_hours=72) if r.status_code == 200 else []
             except Exception:
                 items = []
-
-            for item in items:
-                t_lower = item["title"].lower()
-                matched = False
-                for cat in categories:
-                    if any(kw in t_lower for kw in FILTERS[cat]):
-                        buckets[cat].append(item)
-                        matched = True
-                        break
-                # fallback: se nessuna keyword match, metti nella categoria principale del feed
-                if not matched and fallback_cat:
-                    buckets[fallback_cat].append(item)
+            buckets[bucket].extend(items)
 
     sections = [
         ("🤖 AI", ai_articles),
