@@ -118,15 +118,13 @@ def webhook():
         cb_data = callback.get("data", "")
         cb_id = callback.get("id", "")
         answer_callback(cb_id)
-        if cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("setcat:"):
-            parts = cb_data.split(":", 2)
-            if len(parts) == 3:
-                cat_id, cat_name = parts[1], parts[2]
-                try:
-                    result = asyncio.run(handle_category_callback(cat_id, cat_name))
-                except Exception as e:
-                    result = {"text": f"Errore: {str(e)}"}
-                send_telegram(result["text"], result.get("markup"))
+        if cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("sc:"):
+            try:
+                cat_index = int(cb_data.split(":")[1])
+                result = asyncio.run(handle_category_callback(cat_index))
+            except Exception as e:
+                result = {"text": f"Errore: {str(e)}"}
+            send_telegram(result["text"], result.get("markup"))
         return jsonify({"ok": True})
 
     # Gestione messaggio normale

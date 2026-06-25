@@ -254,11 +254,11 @@ async def handle_cancel() -> dict:
     if pending["action"] == "add_tx":
         payload = pending["payload"]
         cats = await get_all_categories()
-        # Bottoni a griglia 2 per riga
+        # Bottoni a griglia 2 per riga, callback_data = "sc:{index}" (max 5 byte)
         rows = []
         row = []
-        for c in cats:
-            row.append({"text": c["name"], "callback_data": f"setcat:{c['id']}:{c['name']}"})
+        for i, c in enumerate(cats):
+            row.append({"text": c["name"], "callback_data": f"sc:{i}"})
             if len(row) == 2:
                 rows.append(row)
                 row = []
@@ -270,26 +270,29 @@ async def handle_cancel() -> dict:
                      f"• *{payload['merchant']}* -€{float(payload['amount']):.2f}\n\n"
                      f"Scegli categoria:"),
             "markup": {"inline_keyboard": rows},
-            "pending_payload": payload,
         }
     return {"text": "❌ Annullato."}
 
 
-async def handle_category_callback(cat_id: str, cat_name: str) -> dict:
+async def handle_category_callback(cat_index: int) -> dict:
     """Callback quando utente clicca bottone categoria."""
     pending = await get_pending()
     if not pending or pending["action"] != "add_tx":
         return {"text": "Sessione scaduta, rimanda il comando."}
     await clear_pending(pending["id"])
     payload = pending["payload"]
-    # Salva nuovo pending con cat_id aggiornato
-    payload["cat_id"] = cat_id
+    # Ricarica categorie e prendi quella all'indice
+    cats = await get_all_categories()
+    if cat_index >= len(cats):
+        return {"text": "Categoria non valida, rimanda il comando."}
+    cat = cats[cat_index]
+    payload["cat_id"] = cat["id"]
     await save_pending("add_tx", payload)
     return {
         "text": (f"➕ Vuoi aggiungere:\n"
                  f"• *{payload['merchant']}* -€{float(payload['amount']):.2f}\n"
                  f"• Data: {payload.get('date', 'oggi')}\n"
-                 f"• Categoria: *{cat_name}*\n\n"
+                 f"• Categoria: *{cat['name']}*\n\n"
                  f"Rispondi *sì* per confermare o *no* per annullare.")
     }
 
