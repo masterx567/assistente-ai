@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from router import route_message
 from agents.news import get_morning_briefing
-from agents.budget import get_budget_alerts, format_alerts
+from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary
 
 app = Flask(__name__)
 
@@ -169,11 +169,29 @@ def tick():
         done.append("morning")
 
     # Budget serale: 19:45–20:15
-    if h == 20 and m <= 15 or (h == 19 and m >= 45):
+    if (h == 20 and m <= 15) or (h == 19 and m >= 45):
         alerts = asyncio.run(get_budget_alerts())
         if alerts:
             send_telegram(format_alerts(alerts))
         done.append("evening")
+
+    # Riepilogo settimanale: domenica 20:00 (weekday==6)
+    if now.weekday() == 6 and (h == 20 and m <= 15) or (now.weekday() == 6 and h == 19 and m >= 45):
+        weekly = asyncio.run(get_weekly_spending())
+        send_telegram(format_weekly_summary(weekly))
+        done.append("weekly")
+
+    # Riepilogo mensile: ultimo giorno del mese alle 20:00
+    import calendar as cal_mod
+    last_day = cal_mod.monthrange(now.year, now.month)[1]
+    if now.day == last_day and ((h == 20 and m <= 15) or (h == 19 and m >= 45)):
+        monthly = asyncio.run(get_monthly_spending())
+        alerts = asyncio.run(get_budget_alerts())
+        msg = f"📅 *Riepilogo {now.strftime('%B %Y')}*\n\n" + format_spending_summary(monthly)
+        if alerts:
+            msg += "\n\n" + format_alerts(alerts)
+        send_telegram(msg)
+        done.append("monthly")
 
     # Reminders eventi
     done.extend(_check_reminders(now))

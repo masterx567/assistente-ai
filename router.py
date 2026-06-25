@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 
@@ -27,6 +27,15 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 
 async def route_message(user_text: str) -> str:
     text_lower = user_text.lower()
+
+    # Aggiungi transazione da chat
+    tx_kw = ["ho speso", "ho pagato", "ho comprato", "spesa di", "pagato ", "speso "]
+    if any(w in text_lower for w in tx_kw):
+        return await handle_add_transaction(user_text)
+
+    # Promemoria rapidi
+    if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare"]):
+        return await handle_reminder(user_text)
 
     # Budget / spese
     if any(w in text_lower for w in ["spes", "budget", "quanto", "soldi", "spendo", "categor", "mese"]):
@@ -135,6 +144,45 @@ async def handle_calendar_action(user_text: str) -> str:
         return "\n".join(results) if results else "Nessuna azione eseguita."
     except Exception:
         return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
+
+
+async def handle_add_transaction(user_text: str) -> str:
+    today = datetime.now(ROME)
+    prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
+Estrai dal testo: importo (numero positivo), nome merchant/negozio, data (YYYY-MM-DD, default oggi).
+Rispondi SOLO con JSON: {{"amount": 12.50, "merchant": "McDonald's", "date": "2026-06-25"}}
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 80, "temperature": 0})
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    start = raw.find("{"); end = raw.rfind("}") + 1
+    data = json.loads(raw[start:end])
+    return await add_transaction(data["merchant"], float(data["amount"]), data.get("date"))
+
+
+async def handle_reminder(user_text: str) -> str:
+    today = datetime.now(ROME)
+    prompt = f"""Oggi è {today.strftime('%A %d/%m/%Y')}, ora {today.strftime('%H:%M')}.
+Estrai dal testo cosa ricordare, data e ora.
+Rispondi SOLO con JSON: {{"text": "cosa ricordare", "date": "YYYY-MM-DD", "time": "HH:MM"}}
+Default time: 09:00. Interpreta date relative italiane (domani, lunedì, ecc.).
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 80, "temperature": 0})
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    start = raw.find("{"); end = raw.rfind("}") + 1
+    data = json.loads(raw[start:end])
+    dt = datetime.strptime(f"{data['date']} {data['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
+    title = f"🔔 Ricorda: {data['text']}"
+    return await add_event(title, dt)
 
 
 async def _extract_search_query(user_text: str) -> str:

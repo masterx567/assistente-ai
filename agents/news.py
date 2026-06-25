@@ -53,6 +53,20 @@ async def get_morning_briefing() -> str:
     tomorrow = today + timedelta(days=1)
     lines = [f"🌅 *Buongiorno! Briefing del {now.strftime('%d/%m/%Y')}*\n"]
 
+    # 0. Meteo
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            w = await client.get("https://wttr.in/Milano?format=j1", headers={"User-Agent": "curl/7.0"})
+        if w.status_code == 200:
+            wj = w.json()
+            cur = wj["current_condition"][0]
+            temp = cur["temp_C"]
+            desc = cur["weatherDesc"][0]["value"]
+            feels = cur["FeelsLikeC"]
+            lines.append(f"🌤️ *Milano* — {temp}°C, percepita {feels}°C, {desc}\n")
+    except Exception:
+        pass
+
     # 1. Impegni
     today_events = await get_today_events()
     lines.append("━━━━━━━━━━━━━━━")
