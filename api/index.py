@@ -212,14 +212,14 @@ def tick():
     h, m = now.hour, now.minute
     done = []
 
-    # Briefing mattutino: 08:45–09:15
-    if (h == 9 and m <= 15) or (h == 8 and m >= 45):
+    # Briefing mattutino: 09:00–09:06 (finestra stretta, 1 tick max)
+    if h == 9 and 0 <= m <= 6:
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
 
-    # Budget serale: 19:45–20:15
-    if (h == 20 and m <= 15) or (h == 19 and m >= 45):
+    # Budget serale: 20:00–20:06
+    if h == 20 and 0 <= m <= 6:
         alerts = asyncio.run(get_budget_alerts())
         if alerts:
             send_telegram(format_alerts(alerts))
@@ -267,19 +267,19 @@ def _check_reminders(now: datetime) -> list[str]:
         title = ev["title"]
         minutes_until = (start - now).total_seconds() / 60
 
-        # Giorno prima alle 20:00 ± 15 min
+        # Giorno prima: 20:00–20:06
         tomorrow = (now + timedelta(days=1)).date()
-        if start.date() == tomorrow and 19 * 60 + 45 <= total_min <= 20 * 60 + 15:
+        if start.date() == tomorrow and h == 20 and 0 <= m <= 6:
             send_telegram(f"📅 Domani alle *{start.strftime('%H:%M')}*: *{title}*")
             sent.append(f"day_before:{title}")
 
-        # 2 ore prima: 105–135 min
-        elif 105 <= minutes_until <= 135:
+        # 2 ore prima: 118–124 min (finestra 6 min centrata su 120)
+        elif 118 <= minutes_until <= 124:
             send_telegram(f"⏰ Tra 2 ore: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"2h:{title}")
 
-        # 1 ora prima: 45–75 min
-        elif 45 <= minutes_until <= 75:
+        # 1 ora prima: 58–64 min (finestra 6 min centrata su 60)
+        elif 58 <= minutes_until <= 64:
             send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"1h:{title}")
 
