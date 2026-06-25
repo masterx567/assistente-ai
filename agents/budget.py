@@ -187,6 +187,20 @@ async def lookup_merchant(merchant: str) -> dict:
     return {"cat_id": None, "cat_name": "Senza categoria"}
 
 
+async def save_merchant_map(merchant: str, cat_id: str) -> bool:
+    """Aggiunge voce nel MerchantMap."""
+    body = {
+        "parent": {"database_id": DB_MERCHANTMAP},
+        "properties": {
+            "merchant_raw": {"title": [{"text": {"content": merchant.upper().strip()}}]},
+            "category": {"relation": [{"id": cat_id}]},
+        }
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json=body)
+    return r.status_code == 200
+
+
 async def add_transaction(merchant: str, amount: float, date_str: str = None, cat_id: str = None) -> str:
     """Aggiunge transazione in Notion. cat_id opzionale: se None fa lookup MerchantMap."""
     if date_str is None:

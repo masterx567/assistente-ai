@@ -125,6 +125,30 @@ def webhook():
             except Exception as e:
                 result = {"text": f"Errore: {str(e)}"}
             send_telegram(result["text"], result.get("markup"))
+        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("sm:"):
+            save = cb_data.split(":")[1] == "1"
+            if save:
+                try:
+                    from agents.pending import get_pending, clear_pending
+                    from agents.budget import save_merchant_map
+                    p = asyncio.run(get_pending())
+                    if p and p["action"] == "save_map":
+                        asyncio.run(save_merchant_map(p["payload"]["merchant"], p["payload"]["cat_id"]))
+                        asyncio.run(clear_pending(p["id"]))
+                        send_telegram("✅ Merchant salvato nel MerchantMap.")
+                    else:
+                        send_telegram("Sessione scaduta.")
+                except Exception as e:
+                    send_telegram(f"Errore: {str(e)}")
+            else:
+                try:
+                    from agents.pending import get_pending, clear_pending
+                    p = asyncio.run(get_pending())
+                    if p:
+                        asyncio.run(clear_pending(p["id"]))
+                except Exception:
+                    pass
+                send_telegram("Ok, non salvato.")
         return jsonify({"ok": True})
 
     # Gestione messaggio normale
@@ -269,6 +293,12 @@ def tick():
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
+
+    # Inizio mese: 1° giorno alle 09:00
+    if now.day == 1 and h == 9 and 0 <= m <= 4:
+        mese = now.strftime("%B %Y")
+        send_telegram(f"🗓️ *Nuovo mese!* Benvenuto in {mese} — budget resettato a zero. Buona fortuna! 💪")
+        done.append("new_month")
 
     # Budget serale: 20:00–20:06
     if h == 20 and 0 <= m <= 4:

@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
@@ -48,6 +48,12 @@ async def route_message(user_text: str) -> str:
              "aggiungi spesa", "nuova spesa", "inserisci spesa"]
     if any(w in text_lower for w in tx_kw):
         return await handle_add_transaction(user_text)
+
+    # Prossimi impegni on-demand
+    if any(w in text_lower for w in ["prossimi impegni", "agenda oggi", "cosa ho oggi", "impegni oggi", "cosa faccio oggi"]):
+        from agents.calendar import get_today_events
+        ev = await get_today_events()
+        return ev if ev else "Nessun impegno oggi né domani."
 
     # Promemoria rapidi
     if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare"]):
@@ -231,7 +237,7 @@ Testo: {user_text}"""
             f"Rispondi *sì* per confermare o *no* per annullare.")
 
 
-async def handle_confirm() -> str:
+async def handle_confirm() -> str | dict:
     pending = await get_pending()
     if not pending:
         return "Nessuna azione in attesa di conferma."
@@ -239,9 +245,28 @@ async def handle_confirm() -> str:
     payload = pending["payload"]
     await clear_pending(pending["id"])
     if action == "add_tx":
-        return await add_transaction(payload["merchant"], float(payload["amount"]), payload.get("date"), payload.get("cat_id"))
+        result = await add_transaction(payload["merchant"], float(payload["amount"]), payload.get("date"), payload.get("cat_id"))
+        # Offri di salvare nel MerchantMap se merchant non era già mappato
+        original_lookup = await lookup_merchant(payload["merchant"])
+        if payload.get("cat_id") and original_lookup["cat_id"] != payload.get("cat_id"):
+            await save_pending("save_map", {"merchant": payload["merchant"], "cat_id": payload["cat_id"]})
+            cat_names = await get_all_categories()
+            cat_name = next((c["name"] for c in cat_names if c["id"] == payload["cat_id"]), "?")
+            return {
+                "text": (f"{result}\n\n"
+                         f"Vuoi salvare *{payload['merchant']}* → *{cat_name}* nel MerchantMap\n"
+                         f"per le prossime volte?"),
+                "markup": {"inline_keyboard": [[
+                    {"text": "✅ Sì, salva", "callback_data": "sm:1"},
+                    {"text": "❌ No", "callback_data": "sm:0"},
+                ]]}
+            }
+        return result
     elif action == "del_tx":
         return await delete_transaction(payload["merchant"], payload.get("amount"), payload.get("date"))
+    elif action == "save_map":
+        await save_merchant_map(payload["merchant"], payload["cat_id"])
+        return "✅ Merchant salvato nel MerchantMap."
     return "Azione sconosciuta."
 
 

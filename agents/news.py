@@ -86,7 +86,26 @@ async def get_morning_briefing() -> str:
             code = cur.get("weatherCode", "")
             desc = _WEATHER_IT.get(str(code), cur["weatherDesc"][0]["value"])
             feels = cur["FeelsLikeC"]
-            lines.append(f"🌤️ *Milano* — {temp}°C, percepita {feels}°C, {desc}\n")
+            lines.append(f"🌤️ *Milano* — {temp}°C, percepita {feels}°C, {desc}")
+            # Previsioni domani e dopodomani
+            forecast = wj.get("weather", [])
+            day_names = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"]
+            forecast_lines = []
+            for day in forecast[1:3]:
+                try:
+                    d = datetime.strptime(day["date"], "%Y-%m-%d")
+                    hourly = day.get("hourly", [])
+                    mid = hourly[4] if len(hourly) > 4 else (hourly[-1] if hourly else {})
+                    fc_code = mid.get("weatherCode", "")
+                    fc_desc = _WEATHER_IT.get(str(fc_code), "")
+                    fc_max = day["maxtempC"]
+                    fc_min = day["mintempC"]
+                    forecast_lines.append(f"  {day_names[d.weekday()]}: {fc_min}°-{fc_max}°C {fc_desc}")
+                except Exception:
+                    pass
+            if forecast_lines:
+                lines.extend(forecast_lines)
+            lines.append("")
     except Exception:
         pass
 
