@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
@@ -245,15 +245,53 @@ async def handle_confirm() -> str:
     return "Azione sconosciuta."
 
 
-async def handle_cancel() -> str:
+async def handle_cancel() -> dict:
     pending = await get_pending()
     if not pending:
-        return "Nessuna azione da annullare."
+        return {"text": "Nessuna azione da annullare."}
     await clear_pending(pending["id"])
-    cats = await get_category_budgets()
-    cat_list = "\n".join(f"  • {c}" for c in sorted(cats.keys()))
-    return (f"❌ Annullato. Rimanda il comando con le correzioni.\n\n"
-            f"Categorie disponibili:\n{cat_list}")
+    # Se era add_tx mostra bottoni categoria per correggere
+    if pending["action"] == "add_tx":
+        payload = pending["payload"]
+        cats = await get_all_categories()
+        # Bottoni a griglia 2 per riga
+        rows = []
+        row = []
+        for c in cats:
+            row.append({"text": c["name"], "callback_data": f"setcat:{c['id']}:{c['name']}"})
+            if len(row) == 2:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        return {
+            "text": (f"❌ Annullato.\n\n"
+                     f"Vuoi riprovare con una categoria diversa?\n"
+                     f"• *{payload['merchant']}* -€{float(payload['amount']):.2f}\n\n"
+                     f"Scegli categoria:"),
+            "markup": {"inline_keyboard": rows},
+            "pending_payload": payload,
+        }
+    return {"text": "❌ Annullato."}
+
+
+async def handle_category_callback(cat_id: str, cat_name: str) -> dict:
+    """Callback quando utente clicca bottone categoria."""
+    pending = await get_pending()
+    if not pending or pending["action"] != "add_tx":
+        return {"text": "Sessione scaduta, rimanda il comando."}
+    await clear_pending(pending["id"])
+    payload = pending["payload"]
+    # Salva nuovo pending con cat_id aggiornato
+    payload["cat_id"] = cat_id
+    await save_pending("add_tx", payload)
+    return {
+        "text": (f"➕ Vuoi aggiungere:\n"
+                 f"• *{payload['merchant']}* -€{float(payload['amount']):.2f}\n"
+                 f"• Data: {payload.get('date', 'oggi')}\n"
+                 f"• Categoria: *{cat_name}*\n\n"
+                 f"Rispondi *sì* per confermare o *no* per annullare.")
+    }
 
 
 async def handle_reminder(user_text: str) -> str:

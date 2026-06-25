@@ -12,7 +12,7 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from router import route_message
+from router import route_message, handle_category_callback
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary
 from agents.reminders import get_pending_reminders, mark_sent
@@ -27,13 +27,24 @@ GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
 ROME = ZoneInfo("Europe/Rome")
 
 
-def send_telegram(text: str):
+def send_telegram(text: str, reply_markup: dict = None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     with httpx.Client(timeout=9) as c:
-        r = c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
+        r = c.post(url, json=payload)
         if not r.json().get("ok"):
-            # Markdown fallisce → riprova senza formattazione
-            c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+            plain = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+            if reply_markup:
+                plain["reply_markup"] = reply_markup
+            c.post(url, json=plain)
+
+
+def answer_callback(callback_query_id: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
+    with httpx.Client(timeout=5) as c:
+        c.post(url, json={"callback_query_id": callback_query_id})
 
 
 def get_access_token() -> str | None:
@@ -99,6 +110,26 @@ def debug():
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
+
+    # Gestione callback_query (click su bottone inline)
+    callback = data.get("callback_query")
+    if callback:
+        cb_chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
+        cb_data = callback.get("data", "")
+        cb_id = callback.get("id", "")
+        answer_callback(cb_id)
+        if cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("setcat:"):
+            parts = cb_data.split(":", 2)
+            if len(parts) == 3:
+                cat_id, cat_name = parts[1], parts[2]
+                try:
+                    result = asyncio.run(handle_category_callback(cat_id, cat_name))
+                except Exception as e:
+                    result = {"text": f"Errore: {str(e)}"}
+                send_telegram(result["text"], result.get("markup"))
+        return jsonify({"ok": True})
+
+    # Gestione messaggio normale
     message = data.get("message", {})
     chat_id = str(message.get("chat", {}).get("id", ""))
     text = message.get("text", "").strip()
@@ -108,7 +139,10 @@ def webhook():
             reply = asyncio.run(route_message(text))
         except Exception as e:
             reply = f"Errore: {str(e)}"
-        send_telegram(reply)
+        if isinstance(reply, dict):
+            send_telegram(reply["text"], reply.get("markup"))
+        else:
+            send_telegram(reply)
 
     return jsonify({"ok": True})
 

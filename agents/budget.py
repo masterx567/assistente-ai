@@ -30,6 +30,12 @@ async def _get_all_category_names() -> dict[str, str]:
     return result
 
 
+async def get_all_categories() -> list[dict]:
+    """Ritorna lista [{id, name}] di tutte le categorie."""
+    names = await _get_all_category_names()
+    return [{"id": k, "name": v} for k, v in sorted(names.items(), key=lambda x: x[1])]
+
+
 async def get_monthly_spending() -> dict:
     """Ritorna spese mese corrente per categoria."""
     now = datetime.now()
