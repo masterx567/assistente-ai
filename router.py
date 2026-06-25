@@ -29,13 +29,16 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 async def route_message(user_text: str) -> str:
     text_lower = user_text.lower()
 
-    # Elimina transazione
-    del_tx_kw = ["elimina transazione", "cancella transazione", "elimina spesa", "cancella spesa", "togli transazione", "rimuovi spesa"]
+    # Elimina transazione (controlla PRIMA del calendario)
+    del_tx_kw = ["elimina transazione", "cancella transazione", "elimina spesa", "cancella spesa",
+                 "togli transazione", "rimuovi spesa", "elimina la transazione", "cancella la transazione"]
     if any(w in text_lower for w in del_tx_kw):
         return await handle_delete_transaction(user_text)
 
-    # Aggiungi transazione da chat
-    tx_kw = ["ho speso", "ho pagato", "ho comprato", "spesa di", "pagato ", "speso "]
+    # Aggiungi transazione da chat (controlla PRIMA del calendario)
+    tx_kw = ["ho speso", "ho pagato", "ho comprato", "spesa di", "pagato ", "speso ",
+             "crea transazione", "aggiungi transazione", "nuova transazione", "inserisci transazione",
+             "aggiungi spesa", "nuova spesa", "inserisci spesa"]
     if any(w in text_lower for w in tx_kw):
         return await handle_add_transaction(user_text)
 
@@ -166,8 +169,9 @@ async def handle_calendar_action(user_text: str) -> str:
 async def handle_add_transaction(user_text: str) -> str:
     today = datetime.now(ROME)
     prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
-Estrai dal testo: importo (numero positivo), nome merchant/negozio, data (YYYY-MM-DD, default oggi).
-Rispondi SOLO con JSON: {{"amount": 12.50, "merchant": "McDonald's", "date": "2026-06-25"}}
+Estrai dal testo: importo (numero positivo), nome merchant/negozio COMPLETO (includi tutto il nome, es. "mcdonalds test"), data (YYYY-MM-DD, default oggi).
+Rispondi SOLO con JSON: {{"amount": 12.50, "merchant": "McDonald's Test", "date": "2026-06-25"}}
+IMPORTANTE: il merchant è il nome esatto del negozio/servizio scritto nel testo, non inventare.
 Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
@@ -184,9 +188,10 @@ Testo: {user_text}"""
 async def handle_delete_transaction(user_text: str) -> str:
     today = datetime.now(ROME)
     prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
-Estrai dal testo: nome merchant/negozio, importo (opzionale), data (opzionale, YYYY-MM-DD).
-Rispondi SOLO con JSON: {{"merchant": "McDonald's", "amount": 12.50, "date": "2026-06-25"}}
+Estrai dal testo: nome merchant/negozio COMPLETO (includi tutto il nome esatto), importo (opzionale), data (opzionale, YYYY-MM-DD).
+Rispondi SOLO con JSON: {{"merchant": "McDonald's Test", "amount": 12.50, "date": "2026-06-25"}}
 Se importo o data non specificati, ometti il campo.
+IMPORTANTE: usa il nome esatto scritto nel testo, non troncare o modificare.
 Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
