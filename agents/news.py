@@ -1,7 +1,8 @@
 import httpx
 import os
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from agents.calendar import get_today_events
 from agents.budget import get_budget_alerts, format_alerts
 
@@ -20,15 +21,26 @@ RSS_FEEDS = [
 ]
 
 
-def _parse_rss(xml_text: str) -> list[dict]:
+def _parse_rss(xml_text: str, max_age_hours: int = 48) -> list[dict]:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     try:
         root = ET.fromstring(xml_text)
         items = []
         for item in root.iter("item"):
             title = (item.findtext("title") or "").strip()
             link = (item.findtext("link") or "").strip()
-            if title and link and "[Removed]" not in title:
-                items.append({"title": title, "url": link})
+            pub_date = item.findtext("pubDate") or ""
+            if not title or not link or "[Removed]" in title:
+                continue
+            # Filtro data
+            if pub_date:
+                try:
+                    dt = parsedate_to_datetime(pub_date)
+                    if dt < cutoff:
+                        continue
+                except Exception:
+                    pass
+            items.append({"title": title, "url": link})
         return items
     except Exception:
         return []
