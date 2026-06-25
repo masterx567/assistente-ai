@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map, get_monthly_comparison
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
@@ -69,6 +69,10 @@ async def route_message(user_text: str) -> str:
             name = t['name'].replace('*', '')
             lines.append(f"• {t['date']} — *{name}* €{t['amount']:.2f}")
         return "\n".join(lines)
+
+    # Confronto mese corrente vs mese scorso
+    if any(w in text_lower for w in ["confronto mese", "vs mese", "mese scorso", "rispetto al mese", "mese precedente"]):
+        return await get_monthly_comparison()
 
     # Budget / spese
     if any(w in text_lower for w in ["spes", "budget", "quanto", "soldi", "spendo", "categor", "mese"]):

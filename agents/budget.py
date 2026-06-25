@@ -1,4 +1,5 @@
 import httpx
+import asyncio
 from datetime import datetime, timedelta
 import os
 
@@ -36,41 +37,31 @@ async def get_all_categories() -> list[dict]:
     return [{"id": k, "name": v} for k, v in sorted(names.items(), key=lambda x: x[1])]
 
 
-async def get_monthly_spending() -> dict:
-    """Ritorna spese mese corrente per categoria."""
-    now = datetime.now()
-    start = f"{now.year}-{now.month:02d}-01"
-    end = f"{now.year}-{now.month:02d}-{_last_day(now.year, now.month):02d}"
-
+async def _get_spending(year: int, month: int) -> dict:
+    """Ritorna spese per categoria per un dato mese."""
+    start = f"{year}-{month:02d}-01"
+    end = f"{year}-{month:02d}-{_last_day(year, month):02d}"
     cat_names = await _get_all_category_names()
-
     body = {
-        "filter": {
-            "and": [
-                {"property": "date", "date": {"on_or_after": start}},
-                {"property": "date", "date": {"on_or_before": end}},
-                {"property": "amount", "number": {"less_than": 0}},
-            ]
-        },
+        "filter": {"and": [
+            {"property": "date", "date": {"on_or_after": start}},
+            {"property": "date", "date": {"on_or_before": end}},
+            {"property": "amount", "number": {"less_than": 0}},
+        ]},
         "page_size": 100,
     }
-
     transactions = []
     cursor = None
     async with httpx.AsyncClient(timeout=30) as client:
         while True:
             if cursor:
                 body["start_cursor"] = cursor
-            r = await client.post(
-                f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query",
-                headers=HEADERS, json=body
-            )
+            r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
             data = r.json()
             transactions.extend(data.get("results", []))
             if not data.get("has_more"):
                 break
             cursor = data.get("next_cursor")
-
     spending: dict[str, float] = {}
     for t in transactions:
         props = t["properties"]
@@ -78,8 +69,42 @@ async def get_monthly_spending() -> dict:
         cat_rel = props.get("category", {}).get("relation", [])
         cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
         spending[cat_name] = spending.get(cat_name, 0) + abs(amount)
-
     return spending
+
+
+async def get_monthly_comparison() -> str:
+    """Confronta spese mese corrente vs mese scorso."""
+    now = datetime.now()
+    prev_month = now.month - 1 if now.month > 1 else 12
+    prev_year = now.year if now.month > 1 else now.year - 1
+    month_names = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+                   "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
+
+    curr, prev = await asyncio.gather(_get_spending(now.year, now.month), _get_spending(prev_year, prev_month))
+    all_cats = sorted(set(list(curr.keys()) + list(prev.keys())))
+
+    curr_total = sum(curr.values())
+    prev_total = sum(prev.values())
+    diff_total = curr_total - prev_total
+    diff_emoji = "🔴" if diff_total > 0 else "🟢"
+
+    lines = [f"📊 *{month_names[now.month]} vs {month_names[prev_month]}*\n"]
+    for cat in all_cats:
+        c = curr.get(cat, 0)
+        p = prev.get(cat, 0)
+        if c == 0 and p == 0:
+            continue
+        diff = c - p
+        arrow = "↑" if diff > 0 else ("↓" if diff < 0 else "→")
+        lines.append(f"• *{cat}*: €{c:.0f} {arrow} (€{p:.0f})")
+    lines.append(f"\n{diff_emoji} *Totale*: €{curr_total:.0f} vs €{prev_total:.0f} ({'+' if diff_total >= 0 else ''}{diff_total:.0f})")
+    return "\n".join(lines)
+
+
+async def get_monthly_spending() -> dict:
+    """Ritorna spese mese corrente per categoria."""
+    now = datetime.now()
+    return await _get_spending(now.year, now.month)
 
 
 async def get_budget_alerts() -> list[dict]:
