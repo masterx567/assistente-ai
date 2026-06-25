@@ -7,10 +7,10 @@ from agents.budget import get_budget_alerts, format_alerts
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
 TOPICS = [
-    ("intelligenza artificiale OR AI OR ChatGPT", "🤖 AI"),
-    ("politica italiana OR governo italiano", "🏛️ Politica"),
-    ("finanza OR mercati OR economia OR borsa", "💹 Finanza"),
-    ("tecnologia OR tech OR startup", "💻 Tecnologia"),
+    ('"intelligenza artificiale" OR "AI" OR "ChatGPT" OR "OpenAI" OR "Anthropic"', "🤖 AI"),
+    ('"governo" OR "parlamento" OR "Meloni" OR "elezioni" OR "politica"', "🏛️ Politica"),
+    ('"borsa" OR "mercati" OR "inflazione" OR "PIL" OR "economia" OR "spread"', "💹 Finanza"),
+    ('"tecnologia" OR "Apple" OR "Google" OR "Microsoft" OR "Meta" OR "smartphone"', "💻 Tecnologia"),
 ]
 
 
@@ -49,10 +49,11 @@ async def get_morning_briefing() -> str:
             topic_lines = []
             for a in articles:
                 title = a.get("title", "")
+                url = a.get("url", "")
                 if not title or title in seen or "[Removed]" in title:
                     continue
                 seen.add(title)
-                topic_lines.append(f"  • {title}")
+                topic_lines.append(f"  • [{title}]({url})")
             if topic_lines:
                 lines.append(f"\n{label}")
                 lines.extend(topic_lines)
