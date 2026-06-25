@@ -56,7 +56,7 @@ async def get_morning_briefing() -> str:
     # 0. Meteo
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            w = await client.get("https://wttr.in/Milano?format=j1", headers={"User-Agent": "curl/7.0"})
+            w = await client.get("https://wttr.in/Milano?lang=it&format=j1", headers={"User-Agent": "curl/7.0"})
         if w.status_code == 200:
             wj = w.json()
             cur = wj["current_condition"][0]

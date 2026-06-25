@@ -226,6 +226,27 @@ async def delete_transaction(merchant: str, amount: float = None, date_str: str 
     return f"Errore eliminazione: {r2.status_code}"
 
 
+async def get_recent_transactions(limit: int = 10) -> list[dict]:
+    """Ultime N transazioni (uscite) ordinate per data."""
+    cat_names = await _get_all_category_names()
+    body = {"filter": {"property": "amount", "number": {"less_than": 0}},
+            "sorts": [{"property": "date", "direction": "descending"}],
+            "page_size": limit}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+    results = []
+    for t in r.json().get("results", [])[:limit]:
+        props = t["properties"]
+        amount = props.get("amount", {}).get("number", 0) or 0
+        date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+        mr = props.get("merchant_raw", {}).get("rich_text", [])
+        name = mr[0]["plain_text"] if mr else props.get("Name", {}).get("title", [{}])[0].get("plain_text", "")
+        cat_rel = props.get("category", {}).get("relation", [])
+        cat = cat_names.get(cat_rel[0]["id"], "?") if cat_rel else "?"
+        results.append({"name": name, "amount": abs(amount), "date": date_str, "category": cat})
+    return results
+
+
 def format_weekly_summary(spending: dict) -> str:
     if not spending:
         return "Nessuna spesa negli ultimi 7 giorni."

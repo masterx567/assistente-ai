@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 
@@ -41,6 +41,16 @@ async def route_message(user_text: str) -> str:
     # Promemoria rapidi
     if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare"]):
         return await handle_reminder(user_text)
+
+    # Ultime spese
+    if any(w in text_lower for w in ["ultime spese", "ultime transazioni", "ultimi acquisti", "cosa ho speso", "cosa ho pagato"]):
+        txs = await get_recent_transactions(10)
+        if not txs:
+            return "Nessuna spesa recente."
+        lines = ["📋 *Ultime 10 spese*\n"]
+        for t in txs:
+            lines.append(f"• {t['date']} — *{t['name']}* €{t['amount']:.2f} _{t['category']}_")
+        return "\n".join(lines)
 
     # Budget / spese
     if any(w in text_lower for w in ["spes", "budget", "quanto", "soldi", "spendo", "categor", "mese"]):
@@ -197,7 +207,7 @@ async def handle_reminder(user_text: str) -> str:
     prompt = f"""Oggi è {today.strftime('%A %d/%m/%Y')}, ora {today.strftime('%H:%M')}.
 Estrai dal testo cosa ricordare, data e ora.
 Rispondi SOLO con JSON: {{"text": "cosa ricordare", "date": "YYYY-MM-DD", "time": "HH:MM"}}
-Default time: 09:00. Interpreta date relative italiane (domani, lunedì, ecc.).
+Default time: 09:00. Interpreta date relative italiane (domani, lunedì, tra X minuti, tra X ore, ecc.).
 Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
@@ -210,7 +220,26 @@ Testo: {user_text}"""
     data = json.loads(raw[start:end])
     dt = datetime.strptime(f"{data['date']} {data['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
     title = f"🔔 Ricorda: {data['text']}"
-    return await add_event(title, dt)
+    minutes_until = (dt - datetime.now(ROME)).total_seconds() / 60
+
+    # Se entro 90 min → notifica immediata, non aspettare il cron
+    if minutes_until <= 90:
+        import asyncio as _asyncio
+        import os as _os, httpx as _httpx
+        async def _send_later():
+            import asyncio
+            await asyncio.sleep(max(0, minutes_until * 60))
+            token = _os.getenv("TELEGRAM_TOKEN")
+            chat_id = _os.getenv("TELEGRAM_CHAT_ID")
+            async with _httpx.AsyncClient() as c:
+                await c.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": f"🔔 *{data['text']}*", "parse_mode": "Markdown"})
+        _asyncio.ensure_future(_send_later())
+        return f"🔔 Promemoria impostato — ti avviso tra {int(max(1,minutes_until))} min"
+
+    # Oltre 90 min → salva in Google Calendar, cron manderà reminder 1h prima
+    await add_event(title, dt)
+    return f"🔔 Promemoria salvato per {dt.strftime('%d/%m alle %H:%M')} — riceverai notifica 1h prima"
 
 
 async def _extract_search_query(user_text: str) -> str:
