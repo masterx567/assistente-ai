@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
+from agents.reminders import add_reminder
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -219,27 +220,7 @@ Testo: {user_text}"""
     start = raw.find("{"); end = raw.rfind("}") + 1
     data = json.loads(raw[start:end])
     dt = datetime.strptime(f"{data['date']} {data['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
-    title = f"🔔 Ricorda: {data['text']}"
-    minutes_until = (dt - datetime.now(ROME)).total_seconds() / 60
-
-    # Se entro 90 min → notifica immediata, non aspettare il cron
-    if minutes_until <= 90:
-        import asyncio as _asyncio
-        import os as _os, httpx as _httpx
-        async def _send_later():
-            import asyncio
-            await asyncio.sleep(max(0, minutes_until * 60))
-            token = _os.getenv("TELEGRAM_TOKEN")
-            chat_id = _os.getenv("TELEGRAM_CHAT_ID")
-            async with _httpx.AsyncClient() as c:
-                await c.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                    json={"chat_id": chat_id, "text": f"🔔 *{data['text']}*", "parse_mode": "Markdown"})
-        _asyncio.ensure_future(_send_later())
-        return f"🔔 Promemoria impostato — ti avviso tra {int(max(1,minutes_until))} min"
-
-    # Oltre 90 min → salva in Google Calendar, cron manderà reminder 1h prima
-    await add_event(title, dt)
-    return f"🔔 Promemoria salvato per {dt.strftime('%d/%m alle %H:%M')} — riceverai notifica 1h prima"
+    return await add_reminder(data["text"], dt)
 
 
 async def _extract_search_query(user_text: str) -> str:

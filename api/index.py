@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from router import route_message
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary
+from agents.reminders import get_pending_reminders, mark_sent
 
 app = Flask(__name__)
 
@@ -193,8 +194,15 @@ def tick():
         send_telegram(msg)
         done.append("monthly")
 
-    # Reminders eventi
+    # Reminders eventi calendario
     done.extend(_check_reminders(now))
+
+    # Promemoria Notion
+    pending = asyncio.run(get_pending_reminders(now))
+    for rem in pending:
+        send_telegram(f"🔔 *{rem['text']}*")
+        asyncio.run(mark_sent(rem["id"]))
+        done.append(f"reminder:{rem['text']}")
 
     return jsonify({"ok": True, "done": done})
 
@@ -226,11 +234,6 @@ def _check_reminders(now: datetime) -> list[str]:
             send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"1h:{title}")
 
-        # Reminder imminente 🔔 (0–35 min): per promemoria rapidi da chat
-        elif 0 <= minutes_until <= 35 and title.startswith("🔔"):
-            reminder_text = title.replace("🔔 Ricorda: ", "").replace("🔔 ", "")
-            send_telegram(f"🔔 *{reminder_text}*")
-            sent.append(f"now:{title}")
 
     return sent
 
