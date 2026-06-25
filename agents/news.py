@@ -79,10 +79,10 @@ async def get_morning_briefing() -> str:
             buckets[bucket].extend(items)
 
     sections = [
-        ("🤖 AI", ai_articles),
-        ("🏛️ Politica", pol_articles),
-        ("💹 Finanza", fin_articles),
-        ("💻 Tecnologia", tech_articles),
+        ("🤖 AI", buckets["ai"]),
+        ("🏛️ Politica", buckets["politica"]),
+        ("💹 Finanza", buckets["finanza"]),
+        ("💻 Tecnologia", buckets["tech"]),
     ]
 
     seen = set()
