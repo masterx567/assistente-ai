@@ -88,6 +88,47 @@ async def rename_event(old_title: str, new_title: str) -> str:
     return f"Errore rinomina: {r2.status_code}"
 
 
+async def reschedule_event(title_fragment: str, new_date: str, new_time: str) -> str:
+    token = await _get_access_token()
+    if not token:
+        return "Credenziali Google Calendar non configurate."
+
+    now = datetime.now(ROME).strftime("%Y-%m-%dT%H:%M:%SZ")
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.get(
+            f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"q": title_fragment, "timeMin": now, "maxResults": 5, "singleEvents": True},
+        )
+
+    items = r.json().get("items", [])
+    if not items:
+        return f"Nessun evento trovato con '{title_fragment}'."
+
+    ev = items[0]
+    ev_id = ev["id"]
+    ev_title = ev.get("summary", title_fragment)
+
+    new_start = datetime.strptime(f"{new_date} {new_time}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
+    new_end = new_start + timedelta(hours=1)
+    fmt = "%Y-%m-%dT%H:%M:%S"
+    tz = "Europe/Rome"
+
+    async with httpx.AsyncClient(timeout=10) as c:
+        r2 = await c.patch(
+            f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events/{ev_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "start": {"dateTime": new_start.strftime(fmt), "timeZone": tz},
+                "end": {"dateTime": new_end.strftime(fmt), "timeZone": tz},
+            },
+        )
+
+    if r2.status_code == 200:
+        return f"🕐 Spostato: *{ev_title}* → {new_start.strftime('%d/%m alle %H:%M')}"
+    return f"Errore spostamento: {r2.status_code}"
+
+
 async def delete_event_by_title(title_fragment: str) -> str:
     token = await _get_access_token()
     if not token:

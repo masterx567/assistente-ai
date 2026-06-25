@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts
 from agents.news import get_morning_briefing
-from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event
+from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -69,12 +69,12 @@ async def _extract_events_from_text(user_text: str) -> list[dict]:
 
 Analizza il testo e restituisci un array JSON con tutte le azioni da eseguire.
 Ogni azione ha:
-- "action": "add", "delete" o "rename"
-- "title": nome COMPLETO dell'evento (per add/delete)
+- "action": "add", "delete", "rename" o "reschedule"
+- "title": nome COMPLETO dell'evento (per add/delete/reschedule)
 - "old_title": nome attuale (solo per rename)
 - "new_title": nuovo nome (solo per rename)
-- "date": "YYYY-MM-DD" (solo per add)
-- "time": "HH:MM" (solo per add, default "09:00" se non specificato)
+- "date": "YYYY-MM-DD" (per add e reschedule)
+- "time": "HH:MM" (per add e reschedule, default "09:00" se non specificato)
 
 Interpreta date relative in italiano (oggi, domani, lunedì, ecc.).
 IMPORTANTE: le parole "impegno", "evento", "appuntamento" sono parole generiche, NON fanno parte del titolo. Ignorale nel titolo.
@@ -85,6 +85,8 @@ Esempi:
 - "elimina riunione e aggiungi palestra venerdì alle 18" → [{{"action":"delete","title":"riunione"}},{{"action":"add","title":"palestra","date":"2026-06-27","time":"18:00"}}]
 - "modifica nome da vecchio nome a nuovo nome" → [{{"action":"rename","old_title":"vecchio nome","new_title":"nuovo nome"}}]
 - "rinomina dentista in visita medica" → [{{"action":"rename","old_title":"dentista","new_title":"visita medica"}}]
+- "sposta dentista a venerdì alle 15" → [{{"action":"reschedule","title":"dentista","date":"2026-06-27","time":"15:00"}}]
+- "cambia orario palestra a lunedì alle 9" → [{{"action":"reschedule","title":"palestra","date":"2026-06-29","time":"09:00"}}]
 
 Testo: {user_text}"""
 
@@ -114,6 +116,8 @@ async def handle_calendar_action(user_text: str) -> str:
                 results.append(await delete_event_by_title(a["title"]))
             elif a["action"] == "rename":
                 results.append(await rename_event(a["old_title"], a["new_title"]))
+            elif a["action"] == "reschedule":
+                results.append(await reschedule_event(a["title"], a["date"], a["time"]))
         return "\n".join(results) if results else "Nessuna azione eseguita."
     except Exception:
         return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
