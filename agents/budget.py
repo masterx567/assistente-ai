@@ -228,12 +228,14 @@ async def delete_transaction(merchant: str, amount: float = None, date_str: str 
 
 async def get_recent_transactions(limit: int = 10) -> list[dict]:
     """Ultime N transazioni (uscite) ordinate per data."""
-    cat_names = await _get_all_category_names()
+    import asyncio
     body = {"filter": {"property": "amount", "number": {"less_than": 0}},
             "sorts": [{"property": "date", "direction": "descending"}],
             "page_size": limit}
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+        cat_task = _get_all_category_names()
+        tx_task = client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+        cat_names, r = await asyncio.gather(cat_task, tx_task)
     results = []
     for t in r.json().get("results", [])[:limit]:
         props = t["properties"]
