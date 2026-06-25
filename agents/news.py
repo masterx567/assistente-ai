@@ -1,17 +1,31 @@
 import httpx
 import os
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from agents.calendar import get_today_events
 from agents.budget import get_budget_alerts, format_alerts
 
-NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+AI_KW = ["intelligenza artificiale", "ai ", " ai,", "chatgpt", "openai", "anthropic", "llm", "machine learning", "deep learning", "gemini", "copilot"]
 
-TOPICS = [
-    ('"intelligenza artificiale" OR "AI" OR "ChatGPT" OR "OpenAI" OR "Anthropic"', "🤖 AI"),
-    ('"governo" OR "parlamento" OR "Meloni" OR "elezioni" OR "politica"', "🏛️ Politica"),
-    ('"borsa" OR "mercati" OR "inflazione" OR "PIL" OR "economia" OR "spread"', "💹 Finanza"),
-    ('"tecnologia" OR "Apple" OR "Google" OR "Microsoft" OR "Meta" OR "smartphone"', "💻 Tecnologia"),
+RSS_FEEDS = [
+    ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", "tech"),
+    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", "politica"),
+    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", "finanza"),
 ]
+
+
+def _parse_rss(xml_text: str) -> list[dict]:
+    try:
+        root = ET.fromstring(xml_text)
+        items = []
+        for item in root.iter("item"):
+            title = (item.findtext("title") or "").strip()
+            link = (item.findtext("link") or "").strip()
+            if title and link and "[Removed]" not in title:
+                items.append({"title": title, "url": link})
+        return items
+    except Exception:
+        return []
 
 
 async def get_morning_briefing() -> str:
@@ -19,44 +33,58 @@ async def get_morning_briefing() -> str:
 
     # 1. Impegni di oggi
     today_events = await get_today_events()
-    if today_events:
-        lines.append("📅 *Impegni di oggi*")
-        lines.append(today_events)
-    else:
-        lines.append("📅 *Impegni di oggi*\nNessun impegno.")
-
+    lines.append("📅 *Impegni di oggi*")
+    lines.append(today_events if today_events else "Nessun impegno.")
     lines.append("")
 
-    # 2. Notizie per topic
+    # 2. Notizie RSS
     lines.append("📰 *Notizie importanti*")
-    seen = set()
+
+    ai_articles = []
+    tech_articles = []
+    pol_articles = []
+    fin_articles = []
 
     async with httpx.AsyncClient(timeout=15) as client:
-        for query, label in TOPICS:
-            r = await client.get(
-                "https://newsapi.org/v2/everything",
-                params={
-                    "q": query,
-                    "language": "it",
-                    "sortBy": "publishedAt",
-                    "pageSize": 2,
-                    "apiKey": NEWS_API_KEY,
-                },
-            )
-            if r.status_code != 200:
+        for url, category in RSS_FEEDS:
+            try:
+                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                items = _parse_rss(r.text) if r.status_code == 200 else []
+            except Exception:
+                items = []
+
+            for item in items:
+                t_lower = item["title"].lower()
+                if category == "tech":
+                    if any(kw in t_lower for kw in AI_KW):
+                        ai_articles.append(item)
+                    else:
+                        tech_articles.append(item)
+                elif category == "politica":
+                    pol_articles.append(item)
+                elif category == "finanza":
+                    fin_articles.append(item)
+
+    sections = [
+        ("🤖 AI", ai_articles),
+        ("🏛️ Politica", pol_articles),
+        ("💹 Finanza", fin_articles),
+        ("💻 Tecnologia", tech_articles),
+    ]
+
+    seen = set()
+    for label, articles in sections:
+        count = 0
+        section_lines = []
+        for a in articles:
+            if a["title"] in seen or count >= 2:
                 continue
-            articles = r.json().get("articles", [])
-            topic_lines = []
-            for a in articles:
-                title = a.get("title", "")
-                url = a.get("url", "")
-                if not title or title in seen or "[Removed]" in title:
-                    continue
-                seen.add(title)
-                topic_lines.append(f"  • [{title}]({url})")
-            if topic_lines:
-                lines.append(f"\n{label}")
-                lines.extend(topic_lines)
+            seen.add(a["title"])
+            section_lines.append(f"  • [{a['title']}]({a['url']})")
+            count += 1
+        if section_lines:
+            lines.append(f"\n{label}")
+            lines.extend(section_lines)
 
     lines.append("")
 
