@@ -34,9 +34,7 @@ async def get_pending() -> dict | None:
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(f"https://api.notion.com/v1/databases/{DB_REMINDERS}/query",
             headers=HEADERS, json={
-                "filter": {"and": [
-                    {"property": "sent", "checkbox": {"equals": False}},
-                ]},
+                "filter": {"property": "sent", "checkbox": {"equals": False}},
                 "sorts": [{"property": "remind_at", "direction": "descending"}],
                 "page_size": 5,
             })

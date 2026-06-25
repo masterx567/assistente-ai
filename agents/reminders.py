@@ -45,6 +45,8 @@ async def get_pending_reminders(now: datetime) -> list[dict]:
     for p in r.json().get("results", []):
         text_parts = p["properties"].get("text", {}).get("title", [])
         text = text_parts[0]["plain_text"] if text_parts else ""
+        if text.startswith("PENDING:"):
+            continue
         results.append({"id": p["id"], "text": text})
     return results
 
