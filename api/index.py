@@ -164,6 +164,26 @@ def test_webhook_full():
         return jsonify({"ok": False, "elapsed_s": round(time.time() - t0, 2), "error": str(e)})
 
 
+@app.route("/api/test-pending")
+def test_pending():
+    """Debug: salva pending test, poi legge, poi cancella."""
+    from agents.pending import save_pending, get_pending, clear_pending
+    import time
+    steps = []
+    try:
+        page_id = asyncio.run(save_pending("add_tx", {"merchant": "TEST", "amount": 1.0, "date": "2026-06-25", "cat_id": None}))
+        steps.append({"step": "save", "page_id": page_id})
+        time.sleep(1)
+        pending = asyncio.run(get_pending())
+        steps.append({"step": "get", "result": pending})
+        if pending:
+            asyncio.run(clear_pending(pending["id"]))
+            steps.append({"step": "clear", "ok": True})
+    except Exception as e:
+        steps.append({"step": "error", "msg": str(e)})
+    return jsonify({"steps": steps})
+
+
 @app.route("/api/morning")
 def morning():
     briefing = asyncio.run(get_morning_briefing())
