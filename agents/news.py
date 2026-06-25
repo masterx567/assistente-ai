@@ -9,6 +9,28 @@ from agents.budget import get_budget_alerts, format_alerts
 
 ROME = ZoneInfo("Europe/Rome")
 
+_WEATHER_IT = {
+    "113": "soleggiato", "116": "parzialmente nuvoloso", "119": "nuvoloso", "122": "coperto",
+    "143": "nebbia", "248": "nebbia", "260": "nebbia ghiacciata",
+    "176": "pioggia leggera", "179": "neve leggera", "182": "pioggia mista a neve",
+    "185": "pioggerella ghiacciata", "200": "temporale locale",
+    "227": "neve con vento", "230": "bufera di neve",
+    "263": "pioggerella leggera", "266": "pioggerella",
+    "281": "pioggerella ghiacciata", "284": "pioggerella ghiacciata",
+    "293": "pioggia leggera", "296": "pioggia leggera", "299": "pioggia moderata",
+    "302": "pioggia moderata", "305": "pioggia intensa", "308": "pioggia intensa",
+    "311": "pioggerella ghiacciata", "314": "pioggerella ghiacciata",
+    "317": "pioggia mista a neve", "320": "pioggia mista a neve",
+    "323": "neve leggera", "326": "neve leggera", "329": "neve moderata",
+    "332": "neve moderata", "335": "neve intensa", "338": "neve intensa",
+    "350": "grandine", "353": "pioggerella", "356": "pioggia intensa",
+    "359": "pioggia torrenziale", "362": "pioggia mista a neve",
+    "365": "pioggia mista a neve", "368": "neve leggera", "371": "neve intensa",
+    "374": "grandine leggera", "377": "grandine",
+    "386": "temporale con pioggia", "389": "temporale con pioggia intensa",
+    "392": "temporale con neve", "395": "bufera di neve con tuoni",
+}
+
 GN = "https://news.google.com/rss/search?hl=it&gl=IT&ceid=IT:it&q="
 
 # (url, bucket, usa_fallback)  — Google News RSS per topic specifici
@@ -61,7 +83,8 @@ async def get_morning_briefing() -> str:
             wj = w.json()
             cur = wj["current_condition"][0]
             temp = cur["temp_C"]
-            desc = cur["weatherDesc"][0]["value"]
+            code = cur.get("weatherCode", "")
+            desc = _WEATHER_IT.get(str(code), cur["weatherDesc"][0]["value"])
             feels = cur["FeelsLikeC"]
             lines.append(f"🌤️ *Milano* — {temp}°C, percepita {feels}°C, {desc}\n")
     except Exception:
