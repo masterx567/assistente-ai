@@ -116,6 +116,28 @@ def morning():
     return jsonify({"ok": True})
 
 
+@app.route("/api/debug-news")
+def debug_news():
+    import xml.etree.ElementTree as ET
+    feeds = [
+        "https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml",
+        "https://www.corriere.it/rss/tecnologia.xml",
+        "https://punto-informatico.it/feed/",
+        "https://www.hdblog.it/rss/",
+    ]
+    result = {}
+    with httpx.Client(timeout=10) as c:
+        for url in feeds:
+            try:
+                r = c.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                root = ET.fromstring(r.text)
+                titles = [(i.findtext("title",""), i.findtext("pubDate","")) for i in list(root.iter("item"))[:3]]
+                result[url] = {"status": r.status_code, "items": titles}
+            except Exception as e:
+                result[url] = {"error": str(e)}
+    return jsonify(result)
+
+
 @app.route("/api/test-morning")
 def test_morning():
     """Test manuale briefing — chiama questo per verificare che funzioni."""

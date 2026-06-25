@@ -90,7 +90,7 @@ async def get_morning_briefing() -> str:
         for url, categories, fallback_cat in RSS_FEEDS:
             try:
                 r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
-                items = _parse_rss(r.text) if r.status_code == 200 else []
+                items = _parse_rss(r.text, max_age_hours=72) if r.status_code == 200 else []
             except Exception:
                 items = []
 
