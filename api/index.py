@@ -110,6 +110,23 @@ def webhook():
     return jsonify({"ok": True})
 
 
+@app.route("/api/test-webhook-full")
+def test_webhook_full():
+    """Simula webhook completo con 'ultime spese' + send_telegram."""
+    import time
+    t0 = time.time()
+    text = "ultime spese"
+    try:
+        reply = asyncio.run(route_message(text))
+        elapsed_route = round(time.time() - t0, 2)
+        send_telegram(reply)
+        elapsed_total = round(time.time() - t0, 2)
+        return jsonify({"ok": True, "elapsed_route_s": elapsed_route, "elapsed_total_s": elapsed_total,
+                        "reply_len": len(reply), "chat_id_env": TELEGRAM_CHAT_ID, "token_set": bool(TELEGRAM_TOKEN)})
+    except Exception as e:
+        return jsonify({"ok": False, "elapsed_s": round(time.time() - t0, 2), "error": str(e)})
+
+
 @app.route("/api/morning")
 def morning():
     briefing = asyncio.run(get_morning_briefing())
