@@ -205,7 +205,11 @@ async def delete_transaction(merchant: str, amount: float = None, date_str: str 
     if date_str:
         filters.append({"property": "date", "date": {"equals": date_str}})
 
-    body = {"filter": {"and": filters} if len(filters) > 1 else filters[0], "page_size": 5}
+    body = {
+        "filter": {"and": filters} if len(filters) > 1 else filters[0],
+        "sorts": [{"property": "date", "direction": "descending"}],
+        "page_size": 5,
+    }
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
     results = r.json().get("results", [])
