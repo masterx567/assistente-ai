@@ -2,64 +2,67 @@ import httpx
 import os
 from datetime import datetime
 from agents.calendar import get_today_events
+from agents.budget import get_budget_alerts, format_alerts
 
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
+TOPICS = [
+    ("intelligenza artificiale OR AI OR ChatGPT", "🤖 AI"),
+    ("politica italiana OR governo italiano", "🏛️ Politica"),
+    ("finanza OR mercati OR economia OR borsa", "💹 Finanza"),
+    ("tecnologia OR tech OR startup", "💻 Tecnologia"),
+]
 
-async def get_morning_briefing(topics: list[str] = None) -> str:
-    """Fetch top Italian news + optional topics."""
-    if topics is None:
-        topics = ["tecnologia", "economia"]
 
-    articles = []
+async def get_morning_briefing() -> str:
+    lines = [f"🌅 *Briefing {datetime.now().strftime('%d/%m/%Y')}*\n"]
 
-    async with httpx.AsyncClient() as client:
-        # Top news Italia
-        r = await client.get(
-            "https://newsapi.org/v2/top-headlines",
-            params={
-                "country": "it",
-                "pageSize": 5,
-                "apiKey": NEWS_API_KEY,
-            },
-        )
-        if r.status_code == 200:
-            articles.extend(r.json().get("articles", []))
+    # 1. Impegni di oggi
+    today_events = await get_today_events()
+    if today_events:
+        lines.append("📅 *Impegni di oggi*")
+        lines.append(today_events)
+    else:
+        lines.append("📅 *Impegni di oggi*\nNessun impegno.")
 
-        # Topic specifici
-        for topic in topics[:2]:
+    lines.append("")
+
+    # 2. Notizie per topic
+    lines.append("📰 *Notizie importanti*")
+    seen = set()
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for query, label in TOPICS:
             r = await client.get(
                 "https://newsapi.org/v2/everything",
                 params={
-                    "q": topic,
+                    "q": query,
                     "language": "it",
                     "sortBy": "publishedAt",
-                    "pageSize": 3,
+                    "pageSize": 2,
                     "apiKey": NEWS_API_KEY,
                 },
             )
-            if r.status_code == 200:
-                articles.extend(r.json().get("articles", []))
+            if r.status_code != 200:
+                continue
+            articles = r.json().get("articles", [])
+            topic_lines = []
+            for a in articles:
+                title = a.get("title", "")
+                if not title or title in seen or "[Removed]" in title:
+                    continue
+                seen.add(title)
+                topic_lines.append(f"  • {title}")
+            if topic_lines:
+                lines.append(f"\n{label}")
+                lines.extend(topic_lines)
 
-    if not articles:
-        return "Nessuna notizia disponibile al momento."
+    lines.append("")
 
-    lines = [f"📰 *Briefing del {datetime.now().strftime('%d/%m/%Y')}*\n"]
-    seen = set()
-    count = 0
-    for a in articles:
-        title = a.get("title", "")
-        if not title or title in seen or "[Removed]" in title:
-            continue
-        seen.add(title)
-        source = a.get("source", {}).get("name", "")
-        lines.append(f"• {title} _{source}_")
-        count += 1
-        if count >= 7:
-            break
-
-    today_events = await get_today_events()
-    if today_events:
-        lines.append(f"\n{today_events}")
+    # 3. Budget alert
+    alerts = await get_budget_alerts()
+    if alerts:
+        lines.append("💸 *Categorie oltre budget*")
+        lines.append(format_alerts(alerts))
 
     return "\n".join(lines)
