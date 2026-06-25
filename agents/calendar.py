@@ -161,6 +161,45 @@ async def delete_event_by_title(title_fragment: str) -> str:
     return f"Errore eliminazione: {r2.status_code}"
 
 
+async def search_events(query: str, days_ahead: int = 365) -> list[dict]:
+    """Cerca eventi per titolo nei prossimi N giorni via Google Calendar API."""
+    token = await _get_access_token()
+    if not token:
+        return []
+    now = datetime.now(ROME)
+    time_max = now + timedelta(days=days_ahead)
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.get(
+            f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "q": query,
+                "timeMin": now.isoformat(),
+                "timeMax": time_max.isoformat(),
+                "singleEvents": True,
+                "orderBy": "startTime",
+                "maxResults": 20,
+            },
+        )
+    results = []
+    for item in r.json().get("items", []):
+        start = item.get("start", {})
+        dt_str = start.get("dateTime") or start.get("date")
+        if not dt_str:
+            continue
+        try:
+            if "T" in dt_str:
+                dt = datetime.fromisoformat(dt_str).astimezone(ROME)
+                time_str = dt.strftime("%H:%M")
+            else:
+                dt = datetime.fromisoformat(dt_str).replace(tzinfo=ROME)
+                time_str = None
+            results.append({"title": item.get("summary", ""), "date": dt.date(), "time": time_str})
+        except Exception:
+            pass
+    return results
+
+
 async def get_events(days_ahead: int = 7) -> list[dict]:
     if not ICAL_URL:
         return []

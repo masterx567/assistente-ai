@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts
 from agents.news import get_morning_briefing
-from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event
+from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -47,6 +47,20 @@ async def route_message(user_text: str) -> str:
 
     if has_add or has_del or has_mod:
         return await handle_calendar_action(user_text)
+
+    # Ricerca eventi per nome ("dimmi quando ho X", "cerca ferie", "quando ho palestra")
+    search_kw = ["quando ho", "quando c'è", "cerca event", "trovami", "tutti gli event", "tutte le volte"]
+    if any(w in text_lower for w in search_kw):
+        query = await _extract_search_query(user_text)
+        if query:
+            results = await search_events(query, days_ahead=365)
+            if results:
+                lines = [f"🔍 *Risultati per '{query}':*\n"]
+                for ev in results:
+                    time_str = f" alle {ev['time']}" if ev.get("time") else ""
+                    lines.append(f"• {ev['date'].strftime('%d/%m/%Y')}{time_str}: {ev['title']}")
+                return "\n".join(lines)
+            return f"Nessun evento trovato con '{query}' nei prossimi 12 mesi."
 
     # Mostra calendario
     cal_keywords = ["impegn", "calendar", "agenda", "appuntament", "settiman", "da fare", "ho da", "cosa faccio", "cosa ho"]
@@ -121,6 +135,27 @@ async def handle_calendar_action(user_text: str) -> str:
         return "\n".join(results) if results else "Nessuna azione eseguita."
     except Exception:
         return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
+
+
+async def _extract_search_query(user_text: str) -> str:
+    """Estrae la parola chiave di ricerca dal testo con Groq."""
+    prompt = f"""Estrai solo il termine di ricerca per il calendario dal testo.
+Esempi:
+- "dimmi quando ho le ferie" → ferie
+- "cerca tutti gli eventi palestra" → palestra
+- "quando ho il dentista" → dentista
+- "trovami gli eventi lavoro" → lavoro
+Rispondi SOLO con il termine, zero altro testo.
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 20, "temperature": 0},
+        )
+    return r.json()["choices"][0]["message"]["content"].strip().lower()
 
 
 async def ask_groq(user_text: str, context: str = "") -> str:
