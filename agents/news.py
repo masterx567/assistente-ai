@@ -24,13 +24,15 @@ FILTERS = {
                  "finanza", "ftse", "nasdaq", "wall street", "recessione", "crescita"],
 }
 
+# (url, categorie_keyword, categoria_fallback_se_nessun_match)
 RSS_FEEDS = [
-    ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", ["ai", "tech"]),
-    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", ["politica"]),
-    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", ["finanza"]),
-    ("https://www.corriere.it/rss/economia.xml", ["finanza"]),
-    ("https://www.corriere.it/rss/tecnologia.xml", ["ai", "tech"]),
-    ("https://punto-informatico.it/feed/", ["ai", "tech"]),
+    ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", ["ai", "tech"], "tech"),
+    ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", ["politica"], "politica"),
+    ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", ["finanza"], "finanza"),
+    ("https://www.corriere.it/rss/economia.xml", ["finanza"], "finanza"),
+    ("https://www.corriere.it/rss/tecnologia.xml", ["ai", "tech"], "tech"),
+    ("https://punto-informatico.it/feed/", ["ai", "tech"], "tech"),
+    ("https://www.hdblog.it/rss/", ["ai", "tech"], "tech"),
 ]
 
 
@@ -62,7 +64,7 @@ async def get_morning_briefing() -> str:
     now = datetime.now(ROME)
     today = date.today()
     tomorrow = today + timedelta(days=1)
-    lines = [f"🌅 *Buongiorno\\! Briefing del {now.strftime('%d/%m/%Y')}*\n"]
+    lines = [f"🌅 *Buongiorno! Briefing del {now.strftime('%d/%m/%Y')}*\n"]
 
     # 1. Impegni
     today_events = await get_today_events()
@@ -85,7 +87,7 @@ async def get_morning_briefing() -> str:
     buckets = {"ai": ai_articles, "tech": tech_articles, "politica": pol_articles, "finanza": fin_articles}
 
     async with httpx.AsyncClient(timeout=15) as client:
-        for url, categories in RSS_FEEDS:
+        for url, categories, fallback_cat in RSS_FEEDS:
             try:
                 r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
                 items = _parse_rss(r.text) if r.status_code == 200 else []
@@ -94,10 +96,15 @@ async def get_morning_briefing() -> str:
 
             for item in items:
                 t_lower = item["title"].lower()
+                matched = False
                 for cat in categories:
                     if any(kw in t_lower for kw in FILTERS[cat]):
                         buckets[cat].append(item)
+                        matched = True
                         break
+                # fallback: se nessuna keyword match, metti nella categoria principale del feed
+                if not matched and fallback_cat:
+                    buckets[fallback_cat].append(item)
 
     sections = [
         ("🤖 AI", ai_articles),

@@ -280,14 +280,18 @@ async def get_today_events() -> str:
     tomorrow = today + timedelta(days=1)
     today_evs = [e for e in events if e["date"] == today]
     tomorrow_evs = [e for e in events if e["date"] == tomorrow]
+    DAYS_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+
     lines = []
     if today_evs:
-        lines.append(f"*Oggi — {today.strftime('%A %d/%m').capitalize()}*")
+        day_name = DAYS_IT[today.weekday()]
+        lines.append(f"*Oggi — {day_name} {today.strftime('%d/%m')}*")
         for ev in today_evs:
             time_str = f" alle {ev['time']}" if ev.get("time") else ""
             lines.append(f"  📌 {ev['title']}{time_str}")
     if tomorrow_evs:
-        lines.append(f"*Domani — {tomorrow.strftime('%A %d/%m').capitalize()}*")
+        day_name = DAYS_IT[tomorrow.weekday()]
+        lines.append(f"*Domani — {day_name} {tomorrow.strftime('%d/%m')}*")
         for ev in tomorrow_evs:
             time_str = f" alle {ev['time']}" if ev.get("time") else ""
             lines.append(f"  📌 {ev['title']}{time_str}")
