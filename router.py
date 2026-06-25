@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
@@ -250,7 +250,10 @@ async def handle_cancel() -> str:
     if not pending:
         return "Nessuna azione da annullare."
     await clear_pending(pending["id"])
-    return "❌ Annullato."
+    cats = await get_category_budgets()
+    cat_list = "\n".join(f"  • {c}" for c in sorted(cats.keys()))
+    return (f"❌ Annullato. Rimanda il comando con le correzioni.\n\n"
+            f"Categorie disponibili:\n{cat_list}")
 
 
 async def handle_reminder(user_text: str) -> str:
