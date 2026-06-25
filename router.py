@@ -249,8 +249,7 @@ async def handle_cancel() -> dict:
     pending = await get_pending()
     if not pending:
         return {"text": "Nessuna azione da annullare."}
-    await clear_pending(pending["id"])
-    # Se era add_tx mostra bottoni categoria per correggere
+    # Se era add_tx mostra bottoni categoria — NON cancellare ora, lo farà handle_category_callback al click
     if pending["action"] == "add_tx":
         payload = pending["payload"]
         cats = await get_all_categories()
@@ -271,6 +270,7 @@ async def handle_cancel() -> dict:
                      f"Scegli categoria:"),
             "markup": {"inline_keyboard": rows},
         }
+    await clear_pending(pending["id"])
     return {"text": "❌ Annullato."}
 
 
