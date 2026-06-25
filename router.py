@@ -210,10 +210,14 @@ Testo: {user_text}"""
 async def handle_delete_transaction(user_text: str) -> str:
     today = datetime.now(ROME)
     prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
-Estrai dal testo: nome merchant/negozio COMPLETO (includi tutto il nome esatto), importo (opzionale), data (opzionale, YYYY-MM-DD).
-Rispondi SOLO con JSON: {{"merchant": "McDonald's Test", "amount": 12.50, "date": "2026-06-25"}}
-Se importo o data non specificati, ometti il campo.
-IMPORTANTE: usa il nome esatto scritto nel testo, non troncare o modificare.
+Dal testo estrai: nome merchant/negozio, importo (opzionale), data (opzionale, YYYY-MM-DD).
+IGNORA le parole di comando come: elimina, cancella, transazione, spesa, togli, rimuovi.
+Il merchant è solo il nome del negozio/servizio, non le parole di comando.
+Esempi:
+- "elimina transazione mcdonalds test 3 euro" → {{"merchant": "mcdonalds test", "amount": 3.0}}
+- "cancella spesa netflix" → {{"merchant": "netflix"}}
+- "elimina transazione amazon del 20 giugno" → {{"merchant": "amazon", "date": "2026-06-20"}}
+Rispondi SOLO con JSON. Se importo o data non presenti, ometti il campo.
 Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
