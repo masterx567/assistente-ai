@@ -139,6 +139,35 @@ def debug_news():
     return jsonify(result)
 
 
+@app.route("/api/test-recent")
+def test_recent():
+    """Debug get_recent_transactions — bypassa routing."""
+    import time
+    t0 = time.time()
+    try:
+        from agents.budget import get_recent_transactions
+        txs = asyncio.run(get_recent_transactions(5))
+        elapsed = round(time.time() - t0, 2)
+        return jsonify({"ok": True, "elapsed_s": elapsed, "count": len(txs), "data": txs})
+    except Exception as e:
+        elapsed = round(time.time() - t0, 2)
+        return jsonify({"ok": False, "elapsed_s": elapsed, "error": str(e)})
+
+
+@app.route("/api/test-route")
+def test_route():
+    """Debug routing — simula messaggio 'ultime spese'."""
+    import time
+    t0 = time.time()
+    try:
+        reply = asyncio.run(route_message("ultime spese"))
+        elapsed = round(time.time() - t0, 2)
+        return jsonify({"ok": True, "elapsed_s": elapsed, "reply": reply})
+    except Exception as e:
+        elapsed = round(time.time() - t0, 2)
+        return jsonify({"ok": False, "elapsed_s": elapsed, "error": str(e)})
+
+
 @app.route("/api/test-morning")
 def test_morning():
     """Test manuale briefing — chiama questo per verificare che funzioni."""
