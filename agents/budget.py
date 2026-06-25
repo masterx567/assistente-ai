@@ -172,6 +172,15 @@ async def _lookup_merchant_category(merchant: str) -> str | None:
     return None
 
 
+async def lookup_merchant(merchant: str) -> dict:
+    """Cerca merchant nel MerchantMap, ritorna {cat_id, cat_name}."""
+    cat_id = await _lookup_merchant_category(merchant)
+    if cat_id:
+        cat_names = await _get_all_category_names()
+        return {"cat_id": cat_id, "cat_name": cat_names.get(cat_id, "Senza categoria")}
+    return {"cat_id": None, "cat_name": "Senza categoria"}
+
+
 async def add_transaction(merchant: str, amount: float, date_str: str = None) -> str:
     """Aggiunge transazione in Notion con categoria dal MerchantMap."""
     if date_str is None:

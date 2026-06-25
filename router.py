@@ -3,10 +3,11 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
+from agents.pending import save_pending, get_pending, clear_pending
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -27,7 +28,13 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 
 
 async def route_message(user_text: str) -> str:
-    text_lower = user_text.lower()
+    text_lower = user_text.lower().strip()
+
+    # Conferma/annulla azione pending
+    if text_lower in ("sì", "si", "yes", "confermo", "ok", "vai", "esegui"):
+        return await handle_confirm()
+    if text_lower in ("no", "annulla", "stop", "cancella", "abort"):
+        return await handle_cancel()
 
     # Elimina transazione (controlla PRIMA del calendario)
     del_tx_kw = ["elimina transazione", "cancella transazione", "elimina spesa", "cancella spesa",
@@ -182,7 +189,16 @@ Testo: {user_text}"""
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("{"); end = raw.rfind("}") + 1
     data = json.loads(raw[start:end])
-    return await add_transaction(data["merchant"], float(data["amount"]), data.get("date"))
+    merchant = data["merchant"]
+    amount = float(data["amount"])
+    date_str = data.get("date", today.strftime("%Y-%m-%d"))
+    cat = await lookup_merchant(merchant)
+    await save_pending("add_tx", {"merchant": merchant, "amount": amount, "date": date_str, "cat_id": cat["cat_id"]})
+    return (f"➕ Vuoi aggiungere:\n"
+            f"• *{merchant}* -€{amount:.2f}\n"
+            f"• Data: {date_str}\n"
+            f"• Categoria: *{cat['cat_name']}*\n\n"
+            f"Rispondi *sì* per confermare o *no* per annullare.")
 
 
 async def handle_delete_transaction(user_text: str) -> str:
@@ -202,11 +218,39 @@ Testo: {user_text}"""
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("{"); end = raw.rfind("}") + 1
     data = json.loads(raw[start:end])
-    return await delete_transaction(
-        data["merchant"],
-        data.get("amount"),
-        data.get("date")
-    )
+    merchant = data["merchant"]
+    amount = data.get("amount")
+    date_str = data.get("date")
+    await save_pending("del_tx", {"merchant": merchant, "amount": amount, "date": date_str})
+    details = f"• *{merchant}*"
+    if amount:
+        details += f" €{float(amount):.2f}"
+    if date_str:
+        details += f" del {date_str}"
+    return (f"🗑️ Vuoi eliminare:\n{details}\n\n"
+            f"Rispondi *sì* per confermare o *no* per annullare.")
+
+
+async def handle_confirm() -> str:
+    pending = await get_pending()
+    if not pending:
+        return "Nessuna azione in attesa di conferma."
+    action = pending["action"]
+    payload = pending["payload"]
+    await clear_pending(pending["id"])
+    if action == "add_tx":
+        return await add_transaction(payload["merchant"], float(payload["amount"]), payload.get("date"))
+    elif action == "del_tx":
+        return await delete_transaction(payload["merchant"], payload.get("amount"), payload.get("date"))
+    return "Azione sconosciuta."
+
+
+async def handle_cancel() -> str:
+    pending = await get_pending()
+    if not pending:
+        return "Nessuna azione da annullare."
+    await clear_pending(pending["id"])
+    return "❌ Annullato."
 
 
 async def handle_reminder(user_text: str) -> str:
