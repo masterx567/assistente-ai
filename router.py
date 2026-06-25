@@ -50,7 +50,7 @@ async def route_message(user_text: str) -> str:
             return "Nessuna spesa recente."
         lines = ["📋 *Ultime 10 spese*\n"]
         for t in txs:
-            lines.append(f"• {t['date']} — *{t['name']}* €{t['amount']:.2f} _{t['category']}_")
+            lines.append(f"• {t['date']} — *{t['name']}* €{t['amount']:.2f}")
         return "\n".join(lines)
 
     # Budget / spese

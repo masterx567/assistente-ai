@@ -228,29 +228,23 @@ async def delete_transaction(merchant: str, amount: float = None, date_str: str 
 
 async def get_recent_transactions(limit: int = 10) -> list[dict]:
     """Ultime N transazioni (uscite) ordinate per data."""
-    import asyncio
     body = {"filter": {"property": "amount", "number": {"less_than": 0}},
             "sorts": [{"property": "date", "direction": "descending"}],
             "page_size": limit}
     async with httpx.AsyncClient(timeout=15) as client:
-        cat_task = _get_all_category_names()
-        tx_task = client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
-        cat_names, r = await asyncio.gather(cat_task, tx_task)
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
     results = []
     for t in r.json().get("results", [])[:limit]:
         props = t["properties"]
         amount = props.get("amount", {}).get("number", 0) or 0
         date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
-        # Prova merchant_raw → merchant_normalized → Name (title)
         mr = props.get("merchant_raw", {}).get("rich_text", [])
         mn = props.get("merchant_normalized", {}).get("rich_text", [])
         title_parts = props.get("Name", {}).get("title", [])
         name = (mr[0]["plain_text"] if mr else
                 mn[0]["plain_text"] if mn else
                 title_parts[0]["plain_text"] if title_parts else "?")
-        cat_rel = props.get("category", {}).get("relation", [])
-        cat = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
-        results.append({"name": name, "amount": abs(amount), "date": date_str, "category": cat})
+        results.append({"name": name, "amount": abs(amount), "date": date_str})
     return results
 
 
