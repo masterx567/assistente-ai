@@ -30,7 +30,10 @@ ROME = ZoneInfo("Europe/Rome")
 def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     with httpx.Client(timeout=9) as c:
-        c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
+        r = c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
+        if not r.json().get("ok"):
+            # Markdown fallisce → riprova senza formattazione
+            c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text})
 
 
 def get_access_token() -> str | None:
