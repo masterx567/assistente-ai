@@ -1,23 +1,36 @@
 import httpx
 import os
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from email.utils import parsedate_to_datetime
+from zoneinfo import ZoneInfo
 from agents.calendar import get_today_events
 from agents.budget import get_budget_alerts, format_alerts
 
+ROME = ZoneInfo("Europe/Rome")
+
 FILTERS = {
-    "ai":       ["intelligenza artificiale", "chatgpt", "openai", "anthropic", "llm", "machine learning", "deep learning", "gemini", "copilot", "claude", "modello ai", "robot", " ai "],
-    "tech":     ["apple", "google", "microsoft", "meta", "smartphone", "app ", "software", "hardware", "iphone", "android", "chip", "processore", "nvidia", "amd"],
-    "politica": ["governo", "parlamento", "senato", "camera", "meloni", "elezioni", "partito", "ministro", "decreto", "legge", "pd ", "lega ", "m5s", "fratelli d'italia"],
-    "finanza":  ["borsa", "mercati", "inflazione", "pil", "spread", "bce", "banca", "azioni", "investimenti", "euro", "dollaro", "petrolio", "tassi", "titoli"],
+    "ai":       ["intelligenza artificiale", "chatgpt", "openai", "anthropic", "llm", "machine learning",
+                 "deep learning", "gemini", "copilot", "claude", "modello ai", "robot", " ai ", "gpt",
+                 "neural", "algoritmo", "automazione", "ai.", "ia ", "ia,"],
+    "tech":     ["apple", "google", "microsoft", "meta", "smartphone", "software", "hardware",
+                 "iphone", "android", "chip", "processore", "nvidia", "amd", "samsung", "tesla",
+                 "tech", "digitale", "cybersicurezza", "hacker", "startup", "silicon"],
+    "politica": ["governo", "parlamento", "senato", "camera", "meloni", "elezioni", "partito",
+                 "ministro", "decreto", "legge", "pd ", "lega ", "m5s", "fratelli", "politica",
+                 "premier", "presidente", "voto", "coalizione", "opposizione"],
+    "finanza":  ["borsa", "mercati", "inflazione", "pil", "spread", "bce", "banca", "azioni",
+                 "investimenti", "euro", "dollaro", "petrolio", "tassi", "titoli", "economia",
+                 "finanza", "ftse", "nasdaq", "wall street", "recessione", "crescita"],
 }
 
 RSS_FEEDS = [
     ("https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml", ["ai", "tech"]),
     ("https://www.ansa.it/sito/notizie/politica/politica_rss.xml", ["politica"]),
     ("https://www.ansa.it/sito/notizie/economia/economia_rss.xml", ["finanza"]),
-    ("https://www.wired.it/rss", ["ai", "tech"]),
+    ("https://www.corriere.it/rss/economia.xml", ["finanza"]),
+    ("https://www.corriere.it/rss/tecnologia.xml", ["ai", "tech"]),
+    ("https://punto-informatico.it/feed/", ["ai", "tech"]),
 ]
 
 
@@ -32,7 +45,6 @@ def _parse_rss(xml_text: str, max_age_hours: int = 48) -> list[dict]:
             pub_date = item.findtext("pubDate") or ""
             if not title or not link or "[Removed]" in title:
                 continue
-            # Filtro data
             if pub_date:
                 try:
                     dt = parsedate_to_datetime(pub_date)
@@ -47,28 +59,35 @@ def _parse_rss(xml_text: str, max_age_hours: int = 48) -> list[dict]:
 
 
 async def get_morning_briefing() -> str:
-    lines = [f"🌅 *Briefing {datetime.now().strftime('%d/%m/%Y')}*\n"]
+    now = datetime.now(ROME)
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    lines = [f"🌅 *Buongiorno\\! Briefing del {now.strftime('%d/%m/%Y')}*\n"]
 
-    # 1. Impegni di oggi
+    # 1. Impegni
     today_events = await get_today_events()
-    lines.append("📅 *Impegni di oggi*")
-    lines.append(today_events if today_events else "Nessun impegno.")
+    lines.append("━━━━━━━━━━━━━━━")
+    lines.append("📅 *AGENDA*")
+    if today_events:
+        lines.append(today_events)
+    else:
+        lines.append("_Nessun impegno oggi né domani_")
     lines.append("")
 
     # 2. Notizie RSS
-    lines.append("📰 *Notizie importanti*")
+    lines.append("━━━━━━━━━━━━━━━")
+    lines.append("📰 *NOTIZIE*")
 
     ai_articles: list = []
     tech_articles: list = []
     pol_articles: list = []
     fin_articles: list = []
-
     buckets = {"ai": ai_articles, "tech": tech_articles, "politica": pol_articles, "finanza": fin_articles}
 
     async with httpx.AsyncClient(timeout=15) as client:
         for url, categories in RSS_FEEDS:
             try:
-                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
                 items = _parse_rss(r.text) if r.status_code == 200 else []
             except Exception:
                 items = []
@@ -88,6 +107,7 @@ async def get_morning_briefing() -> str:
     ]
 
     seen = set()
+    any_news = False
     for label, articles in sections:
         count = 0
         section_lines = []
@@ -100,13 +120,18 @@ async def get_morning_briefing() -> str:
         if section_lines:
             lines.append(f"\n{label}")
             lines.extend(section_lines)
+            any_news = True
+
+    if not any_news:
+        lines.append("_Nessuna notizia recente disponibile_")
 
     lines.append("")
 
     # 3. Budget alert
     alerts = await get_budget_alerts()
     if alerts:
-        lines.append("💸 *Categorie oltre budget*")
+        lines.append("━━━━━━━━━━━━━━━")
+        lines.append("💸 *BUDGET*")
         lines.append(format_alerts(alerts))
 
     return "\n".join(lines)
