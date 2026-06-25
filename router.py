@@ -239,7 +239,7 @@ async def handle_confirm() -> str:
     payload = pending["payload"]
     await clear_pending(pending["id"])
     if action == "add_tx":
-        return await add_transaction(payload["merchant"], float(payload["amount"]), payload.get("date"))
+        return await add_transaction(payload["merchant"], float(payload["amount"]), payload.get("date"), payload.get("cat_id"))
     elif action == "del_tx":
         return await delete_transaction(payload["merchant"], payload.get("amount"), payload.get("date"))
     return "Azione sconosciuta."

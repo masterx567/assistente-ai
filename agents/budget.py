@@ -187,11 +187,12 @@ async def lookup_merchant(merchant: str) -> dict:
     return {"cat_id": None, "cat_name": "Senza categoria"}
 
 
-async def add_transaction(merchant: str, amount: float, date_str: str = None) -> str:
-    """Aggiunge transazione in Notion con categoria dal MerchantMap."""
+async def add_transaction(merchant: str, amount: float, date_str: str = None, cat_id: str = None) -> str:
+    """Aggiunge transazione in Notion. cat_id opzionale: se None fa lookup MerchantMap."""
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
-    cat_id = await _lookup_merchant_category(merchant)
+    if cat_id is None:
+        cat_id = await _lookup_merchant_category(merchant)
     body = {
         "parent": {"database_id": DB_TRANSACTIONS},
         "properties": {
