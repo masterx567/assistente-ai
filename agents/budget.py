@@ -197,6 +197,35 @@ async def add_transaction(merchant: str, amount: float, date_str: str = None) ->
     return f"Errore aggiunta transazione: {r.status_code}"
 
 
+async def delete_transaction(merchant: str, amount: float = None, date_str: str = None) -> str:
+    """Cerca e cancella una transazione in Notion per merchant (+ opzionale amount/date)."""
+    filters = [{"property": "merchant_raw", "rich_text": {"contains": merchant}}]
+    if amount:
+        filters.append({"property": "amount", "number": {"equals": -abs(amount)}})
+    if date_str:
+        filters.append({"property": "date", "date": {"equals": date_str}})
+
+    body = {"filter": {"and": filters} if len(filters) > 1 else filters[0], "page_size": 5}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    if not results:
+        return f"Nessuna transazione trovata con '{merchant}'."
+
+    page = results[0]
+    page_id = page["id"]
+    props = page["properties"]
+    amt = props.get("amount", {}).get("number", 0)
+    mr = props.get("merchant_raw", {}).get("rich_text", [])
+    name = mr[0]["plain_text"] if mr else merchant
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        r2 = await client.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True})
+    if r2.status_code == 200:
+        return f"🗑️ Eliminata: *{name}* €{abs(amt):.2f}"
+    return f"Errore eliminazione: {r2.status_code}"
+
+
 def format_weekly_summary(spending: dict) -> str:
     if not spending:
         return "Nessuna spesa negli ultimi 7 giorni."

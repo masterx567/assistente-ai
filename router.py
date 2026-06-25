@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 
@@ -27,6 +27,11 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 
 async def route_message(user_text: str) -> str:
     text_lower = user_text.lower()
+
+    # Elimina transazione
+    del_tx_kw = ["elimina transazione", "cancella transazione", "elimina spesa", "cancella spesa", "togli transazione", "rimuovi spesa"]
+    if any(w in text_lower for w in del_tx_kw):
+        return await handle_delete_transaction(user_text)
 
     # Aggiungi transazione da chat
     tx_kw = ["ho speso", "ho pagato", "ho comprato", "spesa di", "pagato ", "speso "]
@@ -162,6 +167,29 @@ Testo: {user_text}"""
     start = raw.find("{"); end = raw.rfind("}") + 1
     data = json.loads(raw[start:end])
     return await add_transaction(data["merchant"], float(data["amount"]), data.get("date"))
+
+
+async def handle_delete_transaction(user_text: str) -> str:
+    today = datetime.now(ROME)
+    prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
+Estrai dal testo: nome merchant/negozio, importo (opzionale), data (opzionale, YYYY-MM-DD).
+Rispondi SOLO con JSON: {{"merchant": "McDonald's", "amount": 12.50, "date": "2026-06-25"}}
+Se importo o data non specificati, ometti il campo.
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 80, "temperature": 0})
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    start = raw.find("{"); end = raw.rfind("}") + 1
+    data = json.loads(raw[start:end])
+    return await delete_transaction(
+        data["merchant"],
+        data.get("amount"),
+        data.get("date")
+    )
 
 
 async def handle_reminder(user_text: str) -> str:
