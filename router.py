@@ -91,8 +91,8 @@ async def route_message(user_text: str) -> str:
 
     # Azioni calendario (aggiungi / elimina / misto)
     add_kw = ["aggiungi", "segna", "metti in calendario", "crea", "crei", "creami", "prenota", "nuovo evento", "aggiungimi"]
-    del_kw = ["elimina", "cancella", "rimuovi", "togli"]
-    mod_kw = ["modifica", "rinomina", "cambia nome", "aggiorna", "sposta"]
+    del_kw = ["elimina", "elimini", "cancella", "cancelli", "rimuovi", "rimuovimi", "togli", "toglimi"]
+    mod_kw = ["modifica", "modificami", "rinomina", "cambia nome", "aggiorna", "sposta", "spostami"]
     has_add = any(w in text_lower for w in add_kw)
     has_del = any(w in text_lower for w in del_kw)
     has_mod = any(w in text_lower for w in mod_kw)
