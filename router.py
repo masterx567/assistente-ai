@@ -55,6 +55,12 @@ async def route_message(user_text: str) -> str:
         ev = await get_today_events()
         return ev if ev else "Nessun impegno oggi né domani."
 
+    # Impegni prossimo mese / settimana prossima
+    if any(w in text_lower for w in ["prossimo mese", "mese prossimo", "settimana prossima", "prossima settimana", "impegni del mese"]):
+        days = 30 if "mese" in text_lower else 14
+        events = await get_events(days_ahead=days)
+        return format_events(events)
+
     # Promemoria rapidi
     if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare", "ricordati", "ricorda di"]):
         return await handle_reminder(user_text)
