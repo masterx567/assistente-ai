@@ -43,8 +43,9 @@ def send_telegram(text: str, reply_markup: dict = None):
             c.post(url, json=plain)
 
 
-def transcribe_voice(file_id: str) -> str | None:
-    """Scarica voce da Telegram e trascrive con Groq Whisper."""
+def transcribe_voice(file_id: str, filename: str = "voice.ogg") -> str | None:
+    """Scarica voce/video da Telegram e trascrive con Groq Whisper."""
+    mime = "video/mp4" if filename.endswith(".mp4") else "audio/ogg"
     with httpx.Client(timeout=10) as c:
         r = c.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile", params={"file_id": file_id})
         file_path = r.json().get("result", {}).get("file_path")
@@ -56,7 +57,7 @@ def transcribe_voice(file_id: str) -> str | None:
     r2 = httpx.post(
         "https://api.groq.com/openai/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        files={"file": ("voice.ogg", audio.content, "audio/ogg")},
+        files={"file": (filename, audio.content, mime)},
         data={"model": "whisper-large-v3-turbo", "language": "it"},
         timeout=15,
     )
@@ -178,15 +179,16 @@ def webhook():
     chat_id = str(message.get("chat", {}).get("id", ""))
     text = message.get("text", "").strip()
 
-    # Vocale → trascrizione Whisper
-    voice = message.get("voice") or message.get("audio")
+    # Vocale / video nota → trascrizione Whisper
+    voice = message.get("voice") or message.get("audio") or message.get("video_note")
     if not text and voice and chat_id == TELEGRAM_CHAT_ID:
-        transcribed = transcribe_voice(voice.get("file_id", ""))
+        is_video = "video_note" in message
+        transcribed = transcribe_voice(voice.get("file_id", ""), "video.mp4" if is_video else "voice.ogg")
         if transcribed:
             send_telegram(f"🎤 _{transcribed}_")
             text = transcribed
         else:
-            send_telegram("Non sono riuscito a trascrivere il vocale.")
+            send_telegram("Non sono riuscito a trascrivere il messaggio.")
 
     if text and chat_id == TELEGRAM_CHAT_ID:
         try:
