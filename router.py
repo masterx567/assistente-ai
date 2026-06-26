@@ -75,7 +75,12 @@ async def route_message(user_text: str) -> str:
         "aggiungi spesa", "aggiungimi spesa", "nuova spesa", "inserisci spesa",
         "registra spesa", "segna spesa", "fatto la spesa",
     ]
-    if any(w in text_lower for w in tx_kw):
+    _tx_nouns = ["transazione", "spesa", "acquisto", "pagamento"]
+    _tx_verbs = ["crea", "crei", "creami", "aggiungi", "aggiungimi", "inserisci",
+                 "inseriscimi", "registra", "segna", "metti", "mettimi", "aggiungi"]
+    _has_tx_noun = any(w in text_lower for w in _tx_nouns)
+    _has_tx_verb = any(w in text_lower for w in _tx_verbs)
+    if any(w in text_lower for w in tx_kw) or (_has_tx_noun and _has_tx_verb):
         return await handle_add_transaction(user_text)
 
     # Prossimi impegni on-demand (oggi / domani)
