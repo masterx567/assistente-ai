@@ -21,6 +21,7 @@ app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
@@ -39,6 +40,26 @@ def send_telegram(text: str, reply_markup: dict = None):
             if reply_markup:
                 plain["reply_markup"] = reply_markup
             c.post(url, json=plain)
+
+
+def transcribe_voice(file_id: str) -> str | None:
+    """Scarica voce da Telegram e trascrive con Groq Whisper."""
+    with httpx.Client(timeout=10) as c:
+        r = c.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile", params={"file_id": file_id})
+        file_path = r.json().get("result", {}).get("file_path")
+        if not file_path:
+            return None
+        audio = c.get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}", timeout=10)
+        if audio.status_code != 200:
+            return None
+    r2 = httpx.post(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        files={"file": ("voice.ogg", audio.content, "audio/ogg")},
+        data={"model": "whisper-large-v3-turbo", "language": "it"},
+        timeout=15,
+    )
+    return r2.json().get("text", "").strip() or None
 
 
 def answer_callback(callback_query_id: str):
@@ -155,6 +176,16 @@ def webhook():
     message = data.get("message", {})
     chat_id = str(message.get("chat", {}).get("id", ""))
     text = message.get("text", "").strip()
+
+    # Vocale → trascrizione Whisper
+    voice = message.get("voice") or message.get("audio")
+    if not text and voice and chat_id == TELEGRAM_CHAT_ID:
+        transcribed = transcribe_voice(voice.get("file_id", ""))
+        if transcribed:
+            send_telegram(f"🎤 _{transcribed}_")
+            text = transcribed
+        else:
+            send_telegram("Non sono riuscito a trascrivere il vocale.")
 
     if text and chat_id == TELEGRAM_CHAT_ID:
         try:
