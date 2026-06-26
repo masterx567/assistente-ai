@@ -30,6 +30,22 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 async def route_message(user_text: str) -> str:
     text_lower = user_text.lower().strip()
 
+    # Rimuovi prefissi conversazionali per normalizzare il testo prima del routing
+    _conv_prefixes = [
+        "mi puoi dire ", "puoi dirmi ", "potresti dirmi ", "potresti dirci ",
+        "mi dici ", "mi sai dire ", "sai dirmi ",
+        "dimmi ", "dicci ",
+        "mi mostri ", "mi mostra ", "mostrami ", "puoi mostrarmi ",
+        "mi fai vedere ", "fammi vedere ",
+        "mi dai ", "puoi darmi ", "dammi ",
+        "vorrei sapere ", "voglio sapere ", "vorrei vedere ",
+        "che ne sai di ", "sai qualcosa su ",
+    ]
+    for _p in _conv_prefixes:
+        if text_lower.startswith(_p):
+            text_lower = text_lower[len(_p):]
+            break
+
     # Conferma/annulla azione pending
     _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
     _cancel_kw  = {"no", "annulla", "stop", "abort", "lascia perdere", "lasciare perdere", "non fare", "non voglio"}
@@ -164,11 +180,9 @@ async def route_message(user_text: str) -> str:
     # Ricerca eventi per nome
     search_kw = [
         "quando ho", "quando c'è", "quando ci sono", "quando è",
-        "cerca event", "trovami", "dimmi quando",
-        "mi dici quando", "mi sai dire quando", "sai quando",
+        "cerca event", "trovami",
         "tutti gli event", "tutte le volte", "quante volte",
         "ho in programma", "ho schedulato",
-        "mi dici le", "mi dici i", "mi dici il",
     ]
     if any(w in text_lower for w in search_kw):
         query = await _extract_search_query(user_text)
