@@ -1,6 +1,7 @@
 import httpx
 import asyncio
-from datetime import datetime, timedelta
+import calendar as _calendar
+from datetime import datetime, timedelta, date
 import os
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
@@ -329,6 +330,102 @@ def format_spending_summary(spending: dict) -> str:
         total += amt
     lines.append(f"\n💰 *Totale: €{total:.2f}*")
     return "\n".join(lines)
+
+
+async def get_remaining_budget(cat_query: str) -> str:
+    """Budget rimanente per una categoria (ricerca fuzzy sul nome)."""
+    budgets, spending = await asyncio.gather(get_category_budgets(), get_monthly_spending())
+    cat_query_l = cat_query.lower()
+    matched = next(
+        (name for name in budgets if cat_query_l in name.lower() or name.lower() in cat_query_l),
+        None
+    )
+    if not matched:
+        cats = ", ".join(sorted(budgets.keys()))
+        return f"Categoria '{cat_query}' non trovata. Disponibili: {cats}"
+    budget = budgets[matched]
+    if budget <= 0:
+        return f"Nessun budget impostato per *{matched}*."
+    spent = spending.get(matched, 0)
+    remaining = budget - spent
+    pct = spent / budget * 100
+    if remaining > 0:
+        emoji = "🟢" if pct < 80 else "⚠️"
+        return f"{emoji} *{matched}*: €{spent:.0f}/€{budget:.0f} ({pct:.0f}%)\nTi rimangono *€{remaining:.0f}*."
+    return f"🚨 *{matched}*: sforato di €{abs(remaining):.0f}! (€{spent:.0f}/€{budget:.0f}, {pct:.0f}%)"
+
+
+_MONTHS_IT = {
+    "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+    "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+    "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+}
+
+
+async def get_transactions_by_period(period: str, limit: int = 20) -> list[dict]:
+    """Transazioni filtrate per periodo (settimana / mese corrente / nome mese)."""
+    today = date.today()
+    now = datetime.now()
+    period_l = period.lower().strip()
+
+    if "settimana" in period_l:
+        start = today - timedelta(days=7)
+        end = today
+    else:
+        matched_month = next((num for name, num in _MONTHS_IT.items() if name in period_l), None)
+        if matched_month:
+            year = now.year if matched_month <= now.month else now.year - 1
+            last_day = _calendar.monthrange(year, matched_month)[1]
+            start = date(year, matched_month, 1)
+            end = date(year, matched_month, last_day)
+        else:
+            start = date(now.year, now.month, 1)
+            end = today
+
+    body = {
+        "filter": {"and": [
+            {"property": "date", "date": {"on_or_after": start.isoformat()}},
+            {"property": "date", "date": {"on_or_before": end.isoformat()}},
+            {"property": "amount", "number": {"less_than": 0}},
+        ]},
+        "sorts": [{"property": "date", "direction": "descending"}],
+        "page_size": limit,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query",
+            headers=HEADERS, json=body
+        )
+    results = []
+    for t in r.json().get("results", [])[:limit]:
+        props = t["properties"]
+        amount = props.get("amount", {}).get("number", 0) or 0
+        date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+        mr = props.get("merchant_raw", {}).get("rich_text", [])
+        title_parts = props.get("Name", {}).get("title", [])
+        name = mr[0]["plain_text"] if mr else (title_parts[0]["plain_text"] if title_parts else "?")
+        results.append({"name": name, "amount": abs(amount), "date": date_str})
+    return results, start, end
+
+
+async def add_income(source: str, amount: float, date_str: str = None) -> str:
+    """Aggiunge entrata positiva in Notion."""
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    body = {
+        "parent": {"database_id": DB_TRANSACTIONS},
+        "properties": {
+            "Name": {"title": [{"text": {"content": source}}]},
+            "merchant_raw": {"rich_text": [{"text": {"content": source}}]},
+            "amount": {"number": abs(amount)},
+            "date": {"date": {"start": date_str}},
+        }
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json=body)
+    if r.status_code == 200:
+        return f"💰 Entrata aggiunta: *{source}* +€{abs(amount):.2f}"
+    return f"Errore aggiunta entrata: {r.status_code}"
 
 
 def format_alerts(alerts: list[dict]) -> str:

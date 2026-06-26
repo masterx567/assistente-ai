@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map, get_monthly_comparison
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
@@ -53,6 +53,18 @@ async def route_message(user_text: str) -> str:
         return await handle_confirm()
     if text_lower in _cancel_kw or any(text_lower.startswith(w) for w in ("no ", "annull", "lascia perd")):
         return await handle_cancel()
+
+    # Entrate (controlla PRIMA delle transazioni spese)
+    income_kw = [
+        "ho ricevuto", "ho guadagnato", "ho incassato",
+        "stipendio", "busta paga", "salario",
+        "entrata di", "entrate di", "entrata da",
+        "accredito", "accreditato", "bonifico ricevuto",
+        "rimborso", "freelance", "fattura pagata",
+        "aggiungi entrata", "registra entrata", "nuova entrata", "segna entrata",
+    ]
+    if any(w in text_lower for w in income_kw):
+        return await handle_add_income(user_text)
 
     # Elimina transazione (controlla PRIMA del calendario)
     del_tx_kw = [
@@ -114,18 +126,37 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in reminder_kw):
         return await handle_reminder(user_text)
 
-    # Ultime spese
+    # Budget rimanente per categoria
+    remaining_kw = [
+        "quanto mi rimane", "quanto rimane", "budget rimanente",
+        "quanto posso ancora spendere", "quanto ho ancora",
+        "mi rimane in", "rimasto in", "rimasto nel budget",
+    ]
+    if any(w in text_lower for w in remaining_kw):
+        cat_query = await _extract_category_query(user_text)
+        return await get_remaining_budget(cat_query)
+
+    # Ultime spese con filtro periodo opzionale
     recent_kw = [
         "ultime spese", "ultime transazioni", "ultimi acquisti",
         "cosa ho speso", "cosa ho pagato", "cosa ho comprato",
         "mostra spese", "mostrami spese", "vedi spese", "storico spese",
         "ultime uscite", "le mie spese", "i miei acquisti",
+        "spese di ", "spese del mese", "spese questa settimana",
     ]
     if any(w in text_lower for w in recent_kw):
-        txs = await get_recent_transactions(10)
+        period_kw = ["settimana", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+                     "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+        has_period = any(w in text_lower for w in period_kw) or "mese" in text_lower
+        if has_period:
+            txs, start, end = await get_transactions_by_period(text_lower)
+            label = f"{start.strftime('%d/%m')} – {end.strftime('%d/%m/%Y')}"
+        else:
+            txs = await get_recent_transactions(10)
+            label = "ultime 10"
         if not txs:
-            return "Nessuna spesa recente."
-        lines = ["📋 *Ultime 10 spese*\n"]
+            return "Nessuna spesa nel periodo."
+        lines = [f"📋 *Spese ({label})*\n"]
         for t in txs:
             name = t['name'].replace('*', '')
             lines.append(f"• {t['date']} — *{name}* €{t['amount']:.2f}")
@@ -375,6 +406,8 @@ async def handle_confirm() -> str | dict:
         return result
     elif action == "del_tx":
         return await delete_transaction(payload["merchant"], payload.get("amount"), payload.get("date"))
+    elif action == "add_income":
+        return await add_income(payload["source"], float(payload["amount"]), payload.get("date"))
     elif action == "save_map":
         await save_merchant_map(payload["merchant"], payload["cat_id"])
         return "✅ Merchant salvato nel MerchantMap."
@@ -477,6 +510,56 @@ Testo: {user_text}"""
                   "messages": [{"role": "user", "content": prompt}],
                   "max_tokens": 20, "temperature": 0},
         )
+    return r.json()["choices"][0]["message"]["content"].strip().lower()
+
+
+async def handle_add_income(user_text: str) -> str:
+    """Estrae source e importo dal testo e aggiunge entrata con conferma."""
+    today = datetime.now(ROME)
+    prompt = f"""Estrai source (nome entrata/fonte) e importo da questo testo.
+Rispondi SOLO con JSON: {{"source": "nome", "amount": 123.45, "date": "YYYY-MM-DD"}}
+Date relative: oggi={today.strftime('%Y-%m-%d')}.
+IGNORA parole come: ho ricevuto, ho guadagnato, entrata, aggiungi, registra.
+Esempi:
+- "ho ricevuto 1500 euro di stipendio" → {{"source": "Stipendio", "amount": 1500, "date": "{today.strftime('%Y-%m-%d')}"}}
+- "rimborso spese 200 euro" → {{"source": "Rimborso spese", "amount": 200, "date": "{today.strftime('%Y-%m-%d')}"}}
+- "freelance 500 euro" → {{"source": "Freelance", "amount": 500, "date": "{today.strftime('%Y-%m-%d')}"}}
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 80, "temperature": 0})
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    start = raw.find("{"); end_idx = raw.rfind("}") + 1
+    data = json.loads(raw[start:end_idx])
+    source = data.get("source", "Entrata")
+    amount = float(data.get("amount", 0))
+    date_str = data.get("date", today.strftime("%Y-%m-%d"))
+    await save_pending("add_income", {"source": source, "amount": amount, "date": date_str})
+    return (f"💰 Vuoi aggiungere entrata:\n"
+            f"• *{source}* +€{amount:.2f}\n"
+            f"• Data: {date_str}\n\n"
+            f"Rispondi *sì* per confermare o *no* per annullare.")
+
+
+async def _extract_category_query(user_text: str) -> str:
+    """Estrae il nome della categoria da domande tipo 'quanto mi rimane in shopping'."""
+    prompt = f"""Estrai solo il nome della categoria di spesa dal testo.
+Esempi:
+- "quanto mi rimane nel budget shopping" → shopping
+- "quanto posso ancora spendere in cibo" → cibo
+- "budget rimanente viaggi" → viaggi
+- "quanto ho ancora per le uscite" → uscite
+Rispondi SOLO con il nome categoria (1-2 parole), zero altro testo.
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 20, "temperature": 0})
     return r.json()["choices"][0]["message"]["content"].strip().lower()
 
 
