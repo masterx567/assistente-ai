@@ -31,42 +31,76 @@ async def route_message(user_text: str) -> str:
     text_lower = user_text.lower().strip()
 
     # Conferma/annulla azione pending
-    if text_lower in ("sì", "si", "yes", "confermo", "ok", "vai", "esegui"):
+    _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
+    _cancel_kw  = {"no", "annulla", "stop", "abort", "lascia perdere", "lasciare perdere", "non fare", "non voglio"}
+    if text_lower in _confirm_kw:
         return await handle_confirm()
-    if text_lower in ("no", "annulla", "stop", "cancella", "abort"):
+    if text_lower in _cancel_kw or any(text_lower.startswith(w) for w in ("no ", "annull", "lascia perd")):
         return await handle_cancel()
 
     # Elimina transazione (controlla PRIMA del calendario)
-    del_tx_kw = ["elimina transazione", "cancella transazione", "elimina spesa", "cancella spesa",
-                 "togli transazione", "rimuovi spesa", "elimina la transazione", "cancella la transazione"]
+    del_tx_kw = [
+        "elimina transazione", "elimini transazione", "elimina la transazione",
+        "cancella transazione", "cancelli transazione", "cancella la transazione",
+        "togli transazione", "rimuovi transazione", "rimuovimi transazione",
+        "elimina spesa", "cancella spesa", "togli spesa", "rimuovi spesa",
+        "elimina acquisto", "cancella acquisto",
+    ]
     if any(w in text_lower for w in del_tx_kw):
         return await handle_delete_transaction(user_text)
 
     # Aggiungi transazione da chat (controlla PRIMA del calendario)
-    tx_kw = ["ho speso", "ho pagato", "ho comprato", "spesa di", "pagato ", "speso ",
-             "crea transazione", "aggiungi transazione", "nuova transazione", "inserisci transazione",
-             "aggiungi spesa", "nuova spesa", "inserisci spesa", "fatto la spesa"]
+    tx_kw = [
+        "ho speso", "ho pagato", "ho comprato", "ho acquistato",
+        "spesa di", "pagato ", "speso ", "costato ", "è costato",
+        "crea transazione", "crei transazione", "creami transazione",
+        "aggiungi transazione", "aggiungimi transazione", "inserisci transazione",
+        "nuova transazione", "registra transazione", "segna transazione",
+        "aggiungi spesa", "aggiungimi spesa", "nuova spesa", "inserisci spesa",
+        "registra spesa", "segna spesa", "fatto la spesa",
+    ]
     if any(w in text_lower for w in tx_kw):
         return await handle_add_transaction(user_text)
 
-    # Prossimi impegni on-demand
-    if any(w in text_lower for w in ["prossimi impegni", "agenda oggi", "cosa ho oggi", "impegni oggi", "cosa faccio oggi"]):
+    # Prossimi impegni on-demand (oggi / domani)
+    today_kw = [
+        "prossimi impegni", "agenda oggi", "cosa ho oggi", "impegni oggi",
+        "cosa faccio oggi", "ho oggi", "ho domani", "cosa ho domani",
+        "impegni domani", "agenda domani", "cosa succede oggi", "cosa succede domani",
+    ]
+    if any(w in text_lower for w in today_kw):
         from agents.calendar import get_today_events
         ev = await get_today_events()
         return ev if ev else "Nessun impegno oggi né domani."
 
     # Impegni prossimo mese / settimana prossima
-    if any(w in text_lower for w in ["prossimo mese", "mese prossimo", "settimana prossima", "prossima settimana", "impegni del mese"]):
+    future_kw = [
+        "prossimo mese", "mese prossimo", "impegni del mese",
+        "settimana prossima", "prossima settimana", "prossime settimane",
+        "questo mese", "fine mese",
+    ]
+    if any(w in text_lower for w in future_kw):
         days = 30 if "mese" in text_lower else 14
         events = await get_events(days_ahead=days)
         return format_events(events)
 
-    # Promemoria rapidi
-    if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare", "ricordati", "ricorda di"]):
+    # Promemoria
+    reminder_kw = [
+        "ricordami", "ricorda di", "ricordati", "ricordamelo",
+        "promemoria", "reminder", "non dimenticare", "non mi far dimenticare",
+        "avvisami", "avvertimi", "mandami un reminder",
+    ]
+    if any(w in text_lower for w in reminder_kw):
         return await handle_reminder(user_text)
 
     # Ultime spese
-    if any(w in text_lower for w in ["ultime spese", "ultime transazioni", "ultimi acquisti", "cosa ho speso", "cosa ho pagato"]):
+    recent_kw = [
+        "ultime spese", "ultime transazioni", "ultimi acquisti",
+        "cosa ho speso", "cosa ho pagato", "cosa ho comprato",
+        "mostra spese", "mostrami spese", "vedi spese", "storico spese",
+        "ultime uscite", "le mie spese", "i miei acquisti",
+    ]
+    if any(w in text_lower for w in recent_kw):
         txs = await get_recent_transactions(10)
         if not txs:
             return "Nessuna spesa recente."
@@ -77,7 +111,12 @@ async def route_message(user_text: str) -> str:
         return "\n".join(lines)
 
     # Confronto mese corrente vs mese scorso
-    if any(w in text_lower for w in ["confronto mese", "vs mese", "mese scorso", "rispetto al mese", "mese precedente"]):
+    compare_kw = [
+        "confronto mese", "vs mese", "mese scorso", "mese precedente",
+        "rispetto al mese", "confronta mese", "paragona mese",
+        "ho speso di più", "ho speso di meno", "spendo di più",
+    ]
+    if any(w in text_lower for w in compare_kw):
         return await get_monthly_comparison()
 
     # Budget / spese
@@ -89,10 +128,32 @@ async def route_message(user_text: str) -> str:
             context += "\n\n" + format_alerts(alerts)
         return await ask_groq(user_text, context)
 
-    # Azioni calendario (aggiungi / elimina / misto)
-    add_kw = ["aggiungi", "segna", "metti in calendario", "crea", "crei", "creami", "prenota", "nuovo evento", "aggiungimi"]
-    del_kw = ["elimina", "elimini", "cancella", "cancelli", "rimuovi", "rimuovimi", "togli", "toglimi"]
-    mod_kw = ["modifica", "modificami", "rinomina", "cambia nome", "aggiorna", "sposta", "spostami"]
+    # Azioni calendario (aggiungi / elimina / modifica)
+    add_kw = [
+        "aggiungi", "aggiungimi", "segna", "segnami",
+        "metti in calendario", "mettimi in calendario",
+        "crea", "crei", "creami",
+        "prenota", "prenotami",
+        "nuovo evento", "nuova riunione", "nuovo appuntamento",
+        "inserisci", "inseriscimi",
+        "pianifica", "pianificami", "schedula",
+        "fissa", "fissami",
+    ]
+    del_kw = [
+        "elimina", "elimini", "eliminami",
+        "cancella", "cancelli", "cancellami",
+        "rimuovi", "rimuovimi",
+        "togli", "toglimi",
+        "annulla evento", "cancella evento",
+    ]
+    mod_kw = [
+        "modifica", "modificami", "modificare",
+        "rinomina", "rinominami",
+        "cambia nome", "cambia orario", "cambia data",
+        "aggiorna evento", "aggiorna appuntamento",
+        "sposta", "spostami", "spostare",
+        "posticipa", "anticipa",
+    ]
     has_add = any(w in text_lower for w in add_kw)
     has_del = any(w in text_lower for w in del_kw)
     has_mod = any(w in text_lower for w in mod_kw)
@@ -100,8 +161,13 @@ async def route_message(user_text: str) -> str:
     if has_add or has_del or has_mod:
         return await handle_calendar_action(user_text)
 
-    # Ricerca eventi per nome ("dimmi quando ho X", "cerca ferie", "quando ho palestra")
-    search_kw = ["quando ho", "quando c'è", "cerca event", "trovami", "tutti gli event", "tutte le volte"]
+    # Ricerca eventi per nome
+    search_kw = [
+        "quando ho", "quando c'è", "quando ci sono", "quando è",
+        "cerca event", "trovami", "dimmi quando",
+        "tutti gli event", "tutte le volte", "quante volte",
+        "ho in programma", "ho schedulato",
+    ]
     if any(w in text_lower for w in search_kw):
         query = await _extract_search_query(user_text)
         if query:
@@ -115,13 +181,22 @@ async def route_message(user_text: str) -> str:
             return f"Nessun evento trovato con '{query}' nei prossimi 12 mesi."
 
     # Mostra calendario
-    cal_keywords = ["impegn", "calendar", "agenda", "appuntament", "settiman", "da fare", "ho da", "cosa faccio", "cosa ho"]
+    cal_keywords = [
+        "impegn", "calendar", "agenda", "appuntament",
+        "settiman", "da fare", "ho da", "cosa faccio", "cosa ho",
+        "in programma", "schedulat", "orario",
+    ]
     if any(w in text_lower for w in cal_keywords):
         events = await get_events(days_ahead=7)
         return format_events(events)
 
     # Notizie
-    if any(w in text_lower for w in ["notizi", "news", "succede", "aggiornament", "giornale", "briefing"]):
+    news_kw = [
+        "notizi", "news", "succede", "aggiornament",
+        "giornale", "briefing", "titoli", "attualità",
+        "cosa è successo", "cosa succede nel mondo",
+    ]
+    if any(w in text_lower for w in news_kw):
         briefing = await get_morning_briefing()
         return briefing
 
