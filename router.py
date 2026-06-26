@@ -180,6 +180,7 @@ async def route_message(user_text: str) -> str:
     # Ricerca eventi per nome
     search_kw = [
         "quando ho", "quando c'è", "quando ci sono", "quando è",
+        "quando le", "quando i ", "quando il ", "quando la ", "quando lo ", "quando gli ",
         "cerca event", "trovami",
         "tutti gli event", "tutte le volte", "quante volte",
         "ho in programma", "ho schedulato",
