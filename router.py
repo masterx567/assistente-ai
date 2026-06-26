@@ -28,7 +28,7 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 
 
 async def route_message(user_text: str) -> str:
-    text_lower = user_text.lower().strip()
+    text_lower = user_text.lower().strip().rstrip(".!?,;:")
 
     # Rimuovi prefissi conversazionali per normalizzare il testo prima del routing
     _conv_prefixes = [
