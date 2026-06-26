@@ -90,7 +90,7 @@ async def route_message(user_text: str) -> str:
         return await ask_groq(user_text, context)
 
     # Azioni calendario (aggiungi / elimina / misto)
-    add_kw = ["aggiungi", "segna", "metti in calendario", "crea", "prenota", "nuovo evento"]
+    add_kw = ["aggiungi", "segna", "metti in calendario", "crea", "crei", "creami", "prenota", "nuovo evento", "aggiungimi"]
     del_kw = ["elimina", "cancella", "rimuovi", "togli"]
     mod_kw = ["modifica", "rinomina", "cambia nome", "aggiorna", "sposta"]
     has_add = any(w in text_lower for w in add_kw)
