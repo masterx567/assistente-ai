@@ -165,8 +165,10 @@ async def route_message(user_text: str) -> str:
     search_kw = [
         "quando ho", "quando c'è", "quando ci sono", "quando è",
         "cerca event", "trovami", "dimmi quando",
+        "mi dici quando", "mi sai dire quando", "sai quando",
         "tutti gli event", "tutte le volte", "quante volte",
         "ho in programma", "ho schedulato",
+        "mi dici le", "mi dici i", "mi dici il",
     ]
     if any(w in text_lower for w in search_kw):
         query = await _extract_search_query(user_text)
@@ -434,14 +436,17 @@ Testo: {user_text}"""
 async def _extract_search_query(user_text: str) -> str:
     """Estrae la parola chiave di ricerca dal testo con Groq."""
     prompt = f"""Estrai il termine di ricerca per il calendario dal testo.
-Priorità: nomi propri di persona o servizio (es. "Kenner", "Preply", "dentista Rossi") > attività specifica > argomento generico.
-IGNORA parole generiche come: evento, impegno, appuntamento, lezione, quando, ho, con.
+Priorità: nomi propri di persona o servizio > attività specifica > argomento generico.
+IGNORA: articoli (il, la, le, lo, i, gli, un, una), preposizioni (di, da, in, a, per, con, su), verbi generici (ho, ho, è, ci sono, dici, sai, quando, mi, ti, che), parole come evento/impegno/appuntamento/lezione.
 Esempi:
 - "quando ho lezioni di inglese con Kenner" → kenner
 - "quando ho il dentista" → dentista
+- "mi dici quando le ferie" → ferie
+- "mi dici le ferie" → ferie
 - "cerca tutti gli eventi palestra" → palestra
 - "quando ho preply" → preply
 - "trovami ferie" → ferie
+- "quante volte ho pilates questo mese" → pilates
 Rispondi SOLO con il termine (1-2 parole max), zero altro testo.
 Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
