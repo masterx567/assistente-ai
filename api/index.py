@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from router import route_message, handle_category_callback
+from agents.errors import log_error
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary
 from agents.reminders import get_pending_reminders, mark_sent
@@ -191,7 +192,9 @@ def webhook():
         try:
             reply = asyncio.run(route_message(text))
         except Exception as e:
-            reply = f"Errore: {str(e)}"
+            import traceback as tb
+            log_error(str(e), text, tb.format_exc())
+            reply = f"⚠️ Errore interno. Ho loggato il problema."
         if isinstance(reply, dict):
             send_telegram(reply["text"], reply.get("markup"))
         else:
