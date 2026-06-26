@@ -126,7 +126,7 @@ async def get_budget_alerts() -> list[dict]:
 
 async def get_category_budgets() -> dict[str, float]:
     """Legge budget mensile da Notion Categories."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
             f"https://api.notion.com/v1/databases/{DB_CATEGORIES}/query",
             headers=HEADERS, json={"page_size": 100}
@@ -144,7 +144,7 @@ async def get_category_budgets() -> dict[str, float]:
 
 
 async def _get_category_name(cat_id: str) -> str:
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(f"https://api.notion.com/v1/pages/{cat_id}", headers=HEADERS)
     props = r.json().get("properties", {})
     name_parts = props.get("Name", {}).get("title", [])

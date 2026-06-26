@@ -45,7 +45,7 @@ async def route_message(user_text: str) -> str:
     # Aggiungi transazione da chat (controlla PRIMA del calendario)
     tx_kw = ["ho speso", "ho pagato", "ho comprato", "spesa di", "pagato ", "speso ",
              "crea transazione", "aggiungi transazione", "nuova transazione", "inserisci transazione",
-             "aggiungi spesa", "nuova spesa", "inserisci spesa"]
+             "aggiungi spesa", "nuova spesa", "inserisci spesa", "fatto la spesa"]
     if any(w in text_lower for w in tx_kw):
         return await handle_add_transaction(user_text)
 
@@ -56,7 +56,7 @@ async def route_message(user_text: str) -> str:
         return ev if ev else "Nessun impegno oggi né domani."
 
     # Promemoria rapidi
-    if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare"]):
+    if any(w in text_lower for w in ["ricordami", "promemoria", "reminder", "non dimenticare", "ricordati", "ricorda di"]):
         return await handle_reminder(user_text)
 
     # Ultime spese
