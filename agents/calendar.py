@@ -263,7 +263,8 @@ def format_events(events: list[dict], days_ahead: int = 7) -> str:
         elif d == today + timedelta(days=1):
             day_label = "Domani"
         else:
-            day_label = d.strftime("%A %d/%m")
+            _DAYS_IT = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"]
+            day_label = f"{_DAYS_IT[d.weekday()]} {d.strftime('%d/%m')}"
 
         time_str = f" alle {ev['time']}" if ev.get("time") else ""
         loc_str = f" — {ev['location']}" if ev.get("location") else ""
