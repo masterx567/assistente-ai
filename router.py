@@ -358,13 +358,16 @@ Testo: {user_text}"""
 
 async def _extract_search_query(user_text: str) -> str:
     """Estrae la parola chiave di ricerca dal testo con Groq."""
-    prompt = f"""Estrai solo il termine di ricerca per il calendario dal testo.
+    prompt = f"""Estrai il termine di ricerca per il calendario dal testo.
+Priorità: nomi propri di persona o servizio (es. "Kenner", "Preply", "dentista Rossi") > attività specifica > argomento generico.
+IGNORA parole generiche come: evento, impegno, appuntamento, lezione, quando, ho, con.
 Esempi:
-- "dimmi quando ho le ferie" → ferie
-- "cerca tutti gli eventi palestra" → palestra
+- "quando ho lezioni di inglese con Kenner" → kenner
 - "quando ho il dentista" → dentista
-- "trovami gli eventi lavoro" → lavoro
-Rispondi SOLO con il termine, zero altro testo.
+- "cerca tutti gli eventi palestra" → palestra
+- "quando ho preply" → preply
+- "trovami ferie" → ferie
+Rispondi SOLO con il termine (1-2 parole max), zero altro testo.
 Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(
