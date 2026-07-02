@@ -9,7 +9,7 @@ from agents.news import get_morning_briefing
 from agents.calendar import get_events, get_events_in_range, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
-from agents.journal import add_journal_entry
+from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -53,6 +53,11 @@ async def route_message(user_text: str) -> str:
         note_match = _re.search(r"ho ceduto\s*(.*)", text_lower)
         note = note_match.group(1).strip(" ,.-") if note_match else ""
         return await add_journal_entry(note or "Cedimento.", cedimento=True)
+
+    # Lettura diario: "mostra diario ..." / "rileggi diario ..." — controllalo prima del salvataggio
+    if any(w in text_lower for w in ["mostra diario", "rileggi diario"]):
+        entries, start, end = await get_journal_entries(text_lower)
+        return format_journal_entries(entries, start, end)
 
     # Diario libero: "diario: <testo>" / "diario. <testo>" / "diario <testo>"
     diario_match = _re.search(r"^\s*diario\s*[:.,]?\s*(.+)", user_text, _re.IGNORECASE | _re.DOTALL)
