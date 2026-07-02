@@ -1,8 +1,17 @@
 import httpx
 import asyncio
+import re
 import calendar as _calendar
 from datetime import datetime, timedelta, date
 import os
+
+_MESI_IT = ["", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+            "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"]
+
+
+def mese_anno_it(d) -> str:
+    return f"{_MESI_IT[d.month]} {d.year}"
+
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DB_TRANSACTIONS = os.getenv("NOTION_DB_TRANSACTIONS")
@@ -323,7 +332,7 @@ def format_weekly_summary(spending: dict) -> str:
 def format_spending_summary(spending: dict) -> str:
     if not spending:
         return "Nessuna spesa registrata questo mese."
-    lines = [f"📊 *Spese {datetime.now().strftime('%B %Y')}*\n"]
+    lines = [f"📊 *Spese {mese_anno_it(datetime.now())}*\n"]
     total = 0
     for cat, amt in sorted(spending.items(), key=lambda x: x[1], reverse=True):
         lines.append(f"• {cat}: €{amt:.2f}")
@@ -426,6 +435,422 @@ async def add_income(source: str, amount: float, date_str: str = None) -> str:
     if r.status_code == 200:
         return f"💰 Entrata aggiunta: *{source}* +€{abs(amount):.2f}"
     return f"Errore aggiunta entrata: {r.status_code}"
+
+
+async def _get_transactions_since(days_back: int) -> list[dict]:
+    """Tutte le uscite (expense) negli ultimi N giorni, con merchant/amount/date/category."""
+    start = (date.today() - timedelta(days=days_back)).isoformat()
+    cat_names = await _get_all_category_names()
+    body = {
+        "filter": {"and": [
+            {"property": "date", "date": {"on_or_after": start}},
+            {"property": "amount", "number": {"less_than": 0}},
+        ]},
+        "page_size": 100,
+    }
+    transactions = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+            data = r.json()
+            transactions.extend(data.get("results", []))
+            if not data.get("has_more"):
+                break
+            body["start_cursor"] = data["next_cursor"]
+
+    results = []
+    for t in transactions:
+        props = t["properties"]
+        amount = abs(props.get("amount", {}).get("number", 0) or 0)
+        date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+        mr = props.get("merchant_raw", {}).get("rich_text", [])
+        merchant = mr[0]["plain_text"] if mr else "?"
+        cat_rel = props.get("category", {}).get("relation", [])
+        cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
+        if date_str:
+            results.append({"merchant": merchant, "amount": amount, "date": date_str, "category": cat_name})
+    return results
+
+
+_BNPL_KEYWORDS = ("KLARNA", "SCALAPAY", "PAGA IN 3 RATE", "PAYPAL *PAGA")
+
+
+async def detect_subscriptions(days_back: int = 90) -> list[dict]:
+    """Trova merchant con addebito ciclico ~mensile (intervallo 25-35gg stabile, importo stabile ±8%)."""
+    txs = await _get_transactions_since(days_back)
+    by_merchant: dict[str, list[dict]] = {}
+    for t in txs:
+        by_merchant.setdefault(t["merchant"], []).append(t)
+
+    subs = []
+    for merchant, entries in by_merchant.items():
+        if any(kw in merchant.upper() for kw in _BNPL_KEYWORDS):
+            continue
+        if len(entries) < 2:
+            continue
+        entries = sorted(entries, key=lambda e: e["date"])
+        dates = [date.fromisoformat(e["date"]) for e in entries]
+        deltas = [(dates[i] - dates[i - 1]).days for i in range(1, len(dates))]
+        if not all(25 <= d <= 35 for d in deltas):
+            continue
+
+        amounts = [e["amount"] for e in entries]
+        avg = sum(amounts) / len(amounts)
+        if avg == 0 or any(abs(a - avg) / avg > 0.08 for a in amounts):
+            continue
+
+        avg_interval = round(sum(deltas) / len(deltas))
+        last_date = dates[-1]
+        next_expected = last_date + timedelta(days=avg_interval)
+        subs.append({
+            "merchant": merchant, "amount": avg,
+            "last_charge": last_date.isoformat(),
+            "next_expected": next_expected.isoformat(),
+        })
+    return subs
+
+
+async def check_subscription_reminders() -> list[str]:
+    """Ritorna messaggi reminder per abbonamenti con addebito atteso nei prossimi 2 giorni."""
+    subs = await detect_subscriptions()
+    today = date.today()
+    messages = []
+    for s in subs:
+        next_expected = date.fromisoformat(s["next_expected"])
+        if 0 <= (next_expected - today).days <= 2:
+            messages.append(f"🔔 *{s['merchant']}* ~€{s['amount']:.2f} previsto circa il {next_expected.strftime('%d/%m')}.")
+    return messages
+
+
+async def get_food_digest(days_back: int = 7) -> dict[str, dict]:
+    """Spese bar/ristoranti/fast-food raggruppate per merchant, ultimi N giorni."""
+    txs = await _get_transactions_since(days_back)
+    food = [t for t in txs if t["category"] in ("Ristoranti & Bar",)]
+    digest: dict[str, dict] = {}
+    for t in food:
+        d = digest.setdefault(t["merchant"], {"count": 0, "total": 0.0})
+        d["count"] += 1
+        d["total"] += t["amount"]
+    return digest
+
+
+def format_food_digest(digest: dict[str, dict]) -> str:
+    if not digest:
+        return ""
+    lines = ["\n🍔 *Bar & fast-food ultimi 7 giorni*"]
+    total = 0.0
+    for merchant, d in sorted(digest.items(), key=lambda x: x[1]["total"], reverse=True):
+        lines.append(f"• {merchant} x{d['count']}: €{d['total']:.2f}")
+        total += d["total"]
+    lines.append(f"_Totale piccole spese: €{total:.2f}_")
+    return "\n".join(lines)
+
+
+DB_COMMITMENTS = "609fd00a-fe13-4900-bb2d-f460b134ea4e"
+DB_ACCOUNTS = "13ed0283-e81f-4c95-8c04-57bdc4d15ff5"
+
+
+async def save_account_balance(name: str, balance: float, acc_type: str) -> None:
+    """Crea o aggiorna un conto in Accounts (cerca by Name esatto)."""
+    body = {"filter": {"property": "Name", "title": {"equals": name}}, "page_size": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    today_str = date.today().isoformat()
+    props = {
+        "balance": {"number": balance},
+        "type": {"select": {"name": acc_type}},
+        "last_updated": {"date": {"start": today_str}},
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        if results:
+            await client.patch(f"https://api.notion.com/v1/pages/{results[0]['id']}", headers=HEADERS, json={"properties": props})
+        else:
+            props["Name"] = {"title": [{"text": {"content": name}}]}
+            await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json={"parent": {"database_id": DB_ACCOUNTS}, "properties": props})
+
+
+async def add_loan(person: str, amount: float) -> str:
+    """Registra un prestito dato a una persona (conta positivo nel patrimonio)."""
+    name = f"Prestito a {person.strip().title()}"
+    await save_account_balance(name, amount, "credito")
+    return f"✅ Registrato: *{name}* — €{amount:.2f}"
+
+
+async def get_loans() -> str:
+    """Lista prestiti dati (Accounts type=credito)."""
+    body = {"filter": {"property": "type", "select": {"equals": "credito"}}, "page_size": 50}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    if not results:
+        return "Nessun prestito registrato."
+    lines = ["🤝 *Prestiti dati*\n"]
+    total = 0.0
+    for a in results:
+        props = a["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        balance = props.get("balance", {}).get("number") or 0
+        lines.append(f"• {name}: €{balance:.2f}")
+        total += balance
+    lines.append(f"\n💰 *Totale: €{total:.2f}*")
+    return "\n".join(lines)
+
+
+DB_NETWORTH_HISTORY = "56661457-1b84-476d-98d6-c25d8a260732"
+
+
+async def _compute_net_worth() -> tuple[float, list[str]]:
+    async with httpx.AsyncClient(timeout=15) as client:
+        r_acc = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json={"page_size": 50})
+        r_com = await client.post(
+            f"https://api.notion.com/v1/databases/{DB_COMMITMENTS}/query", headers=HEADERS,
+            json={"filter": {"property": "amount_remaining", "number": {"greater_than": 0}}, "page_size": 50},
+        )
+
+    accounts = r_acc.json().get("results", [])
+    lines = []
+    total = 0.0
+    for a in accounts:
+        props = a["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        balance = props.get("balance", {}).get("number") or 0
+        acc_type = (props.get("type", {}).get("select") or {}).get("name", "")
+        sign = -1 if acc_type == "debt" else 1
+        total += sign * balance
+        lines.append(f"• {name}: €{balance:.2f} ({acc_type})")
+
+    bnpl_remaining = sum((c["properties"].get("amount_remaining", {}).get("number") or 0) for c in r_com.json().get("results", []))
+    if bnpl_remaining:
+        lines.append(f"• Rate BNPL da pagare: -€{bnpl_remaining:.2f}")
+        total -= bnpl_remaining
+
+    return total, lines
+
+
+async def get_net_worth() -> str:
+    """Patrimonio netto: somma Accounts (bank/investment/cash/credito) - debt - rate BNPL rimanenti. Salva snapshot storico."""
+    total, lines = await _compute_net_worth()
+    if not lines:
+        return "Nessun conto registrato in Accounts."
+    await record_net_worth_snapshot(total)
+    return "🏦 *Patrimonio*\n\n" + "\n".join(lines) + f"\n\n💰 *Patrimonio netto: €{total:.2f}*"
+
+
+async def record_net_worth_snapshot(total: float) -> None:
+    """Salva uno snapshot mensile del patrimonio (per trend storico)."""
+    today = date.today()
+    name = mese_anno_it(today)
+    body = {"filter": {"property": "Name", "title": {"equals": name}}, "page_size": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_NETWORTH_HISTORY}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    props = {"total": {"number": total}, "date": {"date": {"start": today.isoformat()}}}
+    async with httpx.AsyncClient(timeout=10) as client:
+        if results:
+            await client.patch(f"https://api.notion.com/v1/pages/{results[0]['id']}", headers=HEADERS, json={"properties": props})
+        else:
+            props["Name"] = {"title": [{"text": {"content": name}}]}
+            await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json={"parent": {"database_id": DB_NETWORTH_HISTORY}, "properties": props})
+
+
+async def get_net_worth_trend() -> str:
+    """Storico patrimonio nel tempo con variazione rispetto al mese precedente."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"https://api.notion.com/v1/databases/{DB_NETWORTH_HISTORY}/query", headers=HEADERS,
+            json={"sorts": [{"property": "date", "direction": "ascending"}], "page_size": 50},
+        )
+    snapshots = r.json().get("results", [])
+    if not snapshots:
+        return "Nessuno storico patrimonio ancora registrato."
+    lines = ["📈 *Andamento patrimonio*\n"]
+    prev = None
+    for s in snapshots:
+        props = s["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        total = props.get("total", {}).get("number") or 0
+        delta = f" ({'+' if total - prev >= 0 else ''}{total - prev:.2f})" if prev is not None else ""
+        lines.append(f"• {name}: €{total:.2f}{delta}")
+        prev = total
+    return "\n".join(lines)
+
+
+async def get_month_projection() -> str:
+    """Proiezione lineare spesa fine mese basata sul ritmo attuale, totale e per categoria."""
+    now = datetime.now()
+    spending, budgets = await asyncio.gather(get_monthly_spending(), get_category_budgets())
+    spent_so_far = sum(spending.values())
+    days_elapsed = now.day
+    days_total = _last_day(now.year, now.month)
+    if days_elapsed == 0 or spent_so_far == 0:
+        return "Non ci sono ancora abbastanza spese questo mese per una proiezione."
+    daily_rate = spent_so_far / days_elapsed
+    projected = daily_rate * days_total
+    remaining_days = days_total - days_elapsed
+
+    over_budget = []
+    for cat, spent in spending.items():
+        budget = budgets.get(cat, 0)
+        if budget <= 0:
+            continue
+        cat_projected = spent / days_elapsed * days_total
+        if cat_projected > budget:
+            over_budget.append((cat, cat_projected, budget))
+    over_budget.sort(key=lambda x: x[1] / x[2], reverse=True)
+
+    lines = [
+        f"📈 *Proiezione fine mese*\n",
+        f"Speso finora: €{spent_so_far:.2f} ({days_elapsed}/{days_total} giorni)",
+        f"Ritmo medio: €{daily_rate:.2f}/giorno",
+        f"Proiezione fine mese: *€{projected:.2f}*",
+        f"({remaining_days} giorni rimasti, stimati altri €{daily_rate * remaining_days:.2f})",
+    ]
+    if over_budget:
+        lines.append("\n⚠️ *Categorie a rischio sforamento:*")
+        for cat, cat_projected, budget in over_budget:
+            lines.append(f"• {cat}: proiezione €{cat_projected:.0f} vs budget €{budget:.0f}")
+    return "\n".join(lines)
+
+
+async def check_loan_reminders() -> list[str]:
+    """Ritorna reminder per prestiti dati non aggiornati da >30 giorni."""
+    body = {"filter": {"property": "type", "select": {"equals": "credito"}}, "page_size": 50}
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json=body)
+    today = date.today()
+    messages = []
+    for a in r.json().get("results", []):
+        props = a["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        balance = props.get("balance", {}).get("number") or 0
+        last_updated_iso = (props.get("last_updated", {}).get("date") or {}).get("start", "")[:10]
+        if not last_updated_iso or balance <= 0:
+            continue
+        last_updated = date.fromisoformat(last_updated_iso)
+        days_since = (today - last_updated).days
+        if days_since >= 30 and days_since % 30 == 0:
+            messages.append(f"🤝 *{name}* (€{balance:.2f}) — è tornato indietro? Rispondi \"restituito {name.replace('Prestito a ', '')}\" se sì.")
+    return messages
+
+
+async def mark_loan_returned(person: str) -> str:
+    """Segna un prestito come restituito (archivia l'account)."""
+    name = f"Prestito a {person.strip().title()}"
+    body = {"filter": {"property": "Name", "title": {"equals": name}}, "page_size": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    if not results:
+        return f"Nessun prestito trovato per '{person}'."
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.patch(f"https://api.notion.com/v1/pages/{results[0]['id']}", headers=HEADERS, json={"archived": True})
+    return f"✅ *{name}* segnato come restituito."
+
+
+async def get_spending_anomalies(months_back: int = 3) -> list[str]:
+    """Categorie con spesa di questo mese anomala rispetto alla media degli ultimi N mesi."""
+    now = datetime.now()
+    history = []
+    for i in range(1, months_back + 1):
+        m = now.month - i
+        y = now.year
+        while m <= 0:
+            m += 12
+            y -= 1
+        history.append(await _get_spending(y, m))
+
+    if not history:
+        return []
+
+    avg_by_cat: dict[str, float] = {}
+    for cat_spending in history:
+        for cat, amt in cat_spending.items():
+            avg_by_cat.setdefault(cat, []).append(amt)
+    avg_by_cat = {cat: sum(vals) / len(vals) for cat, vals in avg_by_cat.items()}
+
+    current = await get_monthly_spending()
+    anomalies = []
+    for cat, spent in current.items():
+        avg = avg_by_cat.get(cat, 0)
+        if avg > 10 and spent > avg * 1.5:
+            pct = (spent / avg - 1) * 100
+            anomalies.append(f"⚠️ *{cat}*: €{spent:.2f} vs media €{avg:.2f} (+{pct:.0f}%)")
+    return anomalies
+
+
+async def get_amortization_table() -> str:
+    """Tabella piani BNPL attivi: totale, rimanente, rate rimaste, prossima scadenza."""
+    body = {
+        "filter": {"property": "amount_remaining", "number": {"greater_than": 0}},
+        "page_size": 50,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_COMMITMENTS}/query", headers=HEADERS, json=body)
+    plans = r.json().get("results", [])
+    if not plans:
+        return "✅ Nessun piano di ammortamento attivo."
+
+    lines = ["💳 *Piani di ammortamento attivi*\n"]
+    tot_installment = 0.0
+    tot_remaining = 0.0
+    for p in plans:
+        props = p["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        name = re.sub(r"\s*\(€[\d.,]+\)\s*$", "", name).strip()
+        total = props.get("amount_total", {}).get("number") or 0
+        remaining = props.get("amount_remaining", {}).get("number") or 0
+        installment = props.get("monthly_installment", {}).get("number") or 0
+        due_iso = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]
+        due = "n/d"
+        if due_iso:
+            try:
+                due = date.fromisoformat(due_iso).strftime("%d/%m/%Y")
+            except ValueError:
+                due = due_iso
+        rate_rimaste = round(remaining / installment) if installment else 0
+        rate_totali = round(total / installment) if installment else 0
+        rata_corrente = rate_totali - rate_rimaste + 1
+        lines.append(
+            f"• *{name}* (€{installment:.2f}/rata)\n"
+            f"   rata {rata_corrente}/{rate_totali} — €{remaining:.2f} rimanenti su €{total:.2f}\n"
+            f"   prossima: {due}"
+        )
+        tot_installment += installment
+        tot_remaining += remaining
+
+    lines.append(f"\n📊 *Totale rate mensili: €{tot_installment:.2f}*\n📊 *Totale ancora da pagare: €{tot_remaining:.2f}*")
+    return "\n\n".join(lines)
+
+
+async def check_commitment_reminders() -> list[str]:
+    """Ritorna messaggi reminder per rate BNPL in scadenza nei prossimi 2 giorni."""
+    today = date.today()
+    limit = (today + timedelta(days=2)).isoformat()
+    body = {
+        "filter": {"and": [
+            {"property": "next_due", "date": {"on_or_before": limit}},
+            {"property": "amount_remaining", "number": {"greater_than": 0}},
+        ]},
+        "page_size": 20,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_COMMITMENTS}/query", headers=HEADERS, json=body)
+    messages = []
+    for c in r.json().get("results", []):
+        props = c["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        installment = props.get("monthly_installment", {}).get("number") or 0
+        remaining = props.get("amount_remaining", {}).get("number") or 0
+        due = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]
+        messages.append(f"💳 *{name}*: rata ~€{installment:.2f} prevista il {due} (rimangono €{remaining:.2f}).")
+    return messages
 
 
 def format_alerts(alerts: list[dict]) -> str:
