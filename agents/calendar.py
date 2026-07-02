@@ -200,6 +200,49 @@ async def search_events(query: str, days_ahead: int = 365) -> list[dict]:
     return results
 
 
+async def get_events_in_range(start: date, end: date) -> list[dict]:
+    if not ICAL_URL:
+        return []
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.get(ICAL_URL)
+    if r.status_code != 200:
+        return []
+    events = []
+    lines = r.text.splitlines()
+    current = {}
+    in_event = False
+    for line in lines:
+        if line == "BEGIN:VEVENT":
+            in_event = True
+            current = {}
+        elif line == "END:VEVENT" and in_event:
+            in_event = False
+            ev_date = current.get("date")
+            if ev_date and start <= ev_date <= end:
+                events.append(current)
+        elif in_event:
+            if line.startswith("SUMMARY:"):
+                current["title"] = line[8:]
+            elif line.startswith("DTSTART"):
+                val = line.split(":")[-1]
+                try:
+                    if "T" in val:
+                        dt = datetime.strptime(val[:15], "%Y%m%dT%H%M%S")
+                        if "Z" in val:
+                            dt = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ROME)
+                        current["date"] = dt.date()
+                        current["time"] = dt.strftime("%H:%M")
+                    else:
+                        current["date"] = datetime.strptime(val[:8], "%Y%m%d").date()
+                        current["time"] = None
+                except Exception:
+                    pass
+            elif line.startswith("LOCATION:"):
+                current["location"] = line[9:]
+    events.sort(key=lambda e: e["date"])
+    return events
+
+
 async def get_events(days_ahead: int = 7) -> list[dict]:
     if not ICAL_URL:
         return []

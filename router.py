@@ -3,9 +3,10 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend
+import re as _re
 from agents.news import get_morning_briefing
-from agents.calendar import get_events, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
+from agents.calendar import get_events, get_events_in_range, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 
@@ -45,6 +46,16 @@ async def route_message(user_text: str) -> str:
         if text_lower.startswith(_p):
             text_lower = text_lower[len(_p):]
             break
+
+    # Risposta a domanda patrimonio Fineco (es. "1250", "fineco 6008.16", "ho 1250,50 su fineco")
+    _num_match = _re.search(r"\d+[.,]\d+|\d+", text_lower)
+    if _num_match:
+        pending = await get_pending()
+        if pending and pending["action"] == "fineco_balance":
+            await clear_pending(pending["id"])
+            amount = float(_num_match.group().replace(",", "."))
+            await save_account_balance("Fineco ETF", amount, "investment")
+            return await get_net_worth()
 
     # Conferma/annulla azione pending
     _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
@@ -106,6 +117,34 @@ async def route_message(user_text: str) -> str:
         ev = await get_today_events()
         return ev if ev else "Nessun impegno oggi né domani."
 
+    # Impegni per mese specifico (es. "eventi luglio", "agenda agosto")
+    _months_cal = {
+        "gennaio": 1, "febbraio": 2, "marzo": 3, "aprile": 4,
+        "maggio": 5, "giugno": 6, "luglio": 7, "agosto": 8,
+        "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
+    }
+    _cal_ctx = ["event", "agenda", "impegn", "appuntament", "calendar", "cosa ho", "cosa c'è", "mi dici"]
+    matched_month = next((m for m in _months_cal if m in text_lower), None)
+    if matched_month and any(w in text_lower for w in _cal_ctx):
+        import calendar as _cal_mod
+        from datetime import date as _date
+        now_year = datetime.now().year
+        mon = _months_cal[matched_month]
+        # Se il mese è già passato quest'anno, prendi il prossimo anno
+        if mon < datetime.now().month:
+            now_year += 1
+        last_day = _cal_mod.monthrange(now_year, mon)[1]
+        start = _date(now_year, mon, 1)
+        end = _date(now_year, mon, last_day)
+        events = await get_events_in_range(start, end)
+        if not events:
+            return f"📅 Nessun evento in {matched_month.capitalize()} {now_year}."
+        lines = [f"📅 *Eventi {matched_month.capitalize()} {now_year}:*\n"]
+        for ev in events:
+            time_str = f" alle {ev['time']}" if ev.get("time") else ""
+            lines.append(f"• {ev['date'].strftime('%d/%m')}{time_str} — {ev['title']}")
+        return "\n".join(lines)
+
     # Impegni prossimo mese / settimana prossima
     future_kw = [
         "prossimo mese", "mese prossimo", "impegni del mese",
@@ -125,6 +164,43 @@ async def route_message(user_text: str) -> str:
     ]
     if any(w in text_lower for w in reminder_kw):
         return await handle_reminder(user_text)
+
+    # Piani di ammortamento BNPL (Klarna/Scalapay/rate)
+    amortization_kw = [
+        "piano di ammortamento", "piani di ammortamento", "piano ammortamento",
+        "rate klarna", "rate scalapay", "pagamenti a rate", "quante rate",
+        "rate rimanenti", "rate rimaste", "quanto manca alle rate",
+        "rate attive", "rate in corso", "le mie rate", "mie rate",
+        "rate da pagare", "rate aperte", "rate", "bnpl",
+    ]
+    if any(w in text_lower for w in amortization_kw):
+        return await get_amortization_table()
+
+    # Andamento patrimonio nel tempo (controlla PRIMA di "patrimonio" generico)
+    if any(w in text_lower for w in ["andamento patrimonio", "storico patrimonio", "trend patrimonio"]):
+        return await get_net_worth_trend()
+
+    # Patrimonio netto
+    if any(w in text_lower for w in ["patrimonio", "quanto vale il mio patrimonio", "net worth"]):
+        return await get_net_worth()
+
+    # Previsione fine mese
+    if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
+        return await get_month_projection()
+
+    # Prestito restituito
+    returned_match = _re.search(r"restituito\s+(\w+)", text_lower)
+    if returned_match:
+        return await mark_loan_returned(returned_match.group(1))
+
+    # Prestiti dati a persone
+    loan_match = _re.search(r"(?:ho prestato|prestato|presto)\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s?€?\s*(?:a|per)\s+(\w+)", text_lower)
+    if loan_match:
+        amount = float(loan_match.group(1).replace(",", "."))
+        person = loan_match.group(2)
+        return await add_loan(person, amount)
+    if any(w in text_lower for w in ["prestiti", "chi mi deve", "prestiti dati", "prestiti attivi"]):
+        return await get_loans()
 
     # Budget rimanente per categoria
     remaining_kw = [
@@ -235,7 +311,7 @@ async def route_message(user_text: str) -> str:
 
     # Mostra calendario
     cal_keywords = [
-        "impegn", "calendar", "agenda", "appuntament",
+        "impegn", "calendar", "agenda", "appuntament", "event",
         "settiman", "da fare", "ho da", "cosa faccio", "cosa ho",
         "in programma", "schedulat", "orario",
     ]
