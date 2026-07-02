@@ -54,8 +54,8 @@ async def route_message(user_text: str) -> str:
         note = note_match.group(1).strip(" ,.-") if note_match else ""
         return await add_journal_entry(note or "Cedimento.", cedimento=True)
 
-    # Diario libero: "diario: <testo>"
-    diario_match = _re.search(r"diario\s*:\s*(.+)", user_text, _re.IGNORECASE | _re.DOTALL)
+    # Diario libero: "diario: <testo>" / "diario. <testo>" / "diario <testo>"
+    diario_match = _re.search(r"^\s*diario\s*[:.,]?\s*(.+)", user_text, _re.IGNORECASE | _re.DOTALL)
     if diario_match:
         return await add_journal_entry(diario_match.group(1).strip())
 
