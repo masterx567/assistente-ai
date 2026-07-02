@@ -9,6 +9,7 @@ from agents.news import get_morning_briefing
 from agents.calendar import get_events, get_events_in_range, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
+from agents.journal import add_journal_entry
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -46,6 +47,17 @@ async def route_message(user_text: str) -> str:
         if text_lower.startswith(_p):
             text_lower = text_lower[len(_p):]
             break
+
+    # Cedimento dipendenza (resetta streak) — controllalo prima del diario generico
+    if "ho ceduto" in text_lower:
+        note_match = _re.search(r"ho ceduto\s*(.*)", text_lower)
+        note = note_match.group(1).strip(" ,.-") if note_match else ""
+        return await add_journal_entry(note or "Cedimento.", cedimento=True)
+
+    # Diario libero: "diario: <testo>"
+    diario_match = _re.search(r"diario\s*:\s*(.+)", user_text, _re.IGNORECASE | _re.DOTALL)
+    if diario_match:
+        return await add_journal_entry(diario_match.group(1).strip())
 
     # Risposta a domanda patrimonio Fineco (es. "1250", "fineco 6008.16", "ho 1250,50 su fineco")
     _num_match = _re.search(r"\d+[.,]\d+|\d+", text_lower)

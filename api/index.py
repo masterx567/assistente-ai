@@ -19,6 +19,7 @@ from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending
 from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions, session_expiry_days
 from agents.pending import save_pending
+from agents.journal import get_streak_days, format_streak_message
 
 app = Flask(__name__)
 
@@ -370,6 +371,12 @@ def tick():
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
+
+    # Incoraggiamento streak dipendenza: 09:00 / 14:00 / 21:00
+    if (h in (9, 14, 21)) and m == 0:
+        days = asyncio.run(get_streak_days())
+        send_telegram(format_streak_message(days))
+        done.append(f"streak:{days}")
 
     # Inizio mese: 1° giorno alle 09:00
     if now.day == 1 and h == 9 and m == 0:
