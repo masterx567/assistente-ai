@@ -15,8 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from router import route_message, handle_category_callback
 from agents.errors import log_error
 from agents.news import get_morning_briefing
-from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary
+from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
 from agents.reminders import get_pending_reminders, mark_sent
+from agents.enable_banking import sync_transactions, session_expiry_days
+from agents.pending import save_pending
 
 app = Flask(__name__)
 
@@ -26,7 +28,19 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
+CRON_SECRET = os.getenv("CRON_SECRET")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
+
+
+def _require_cron_secret():
+    from flask import abort
+    if not CRON_SECRET:
+        abort(403)
+    provided = request.args.get("secret") or \
+        request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if provided != CRON_SECRET:
+        abort(403)
 
 
 def send_telegram(text: str, reply_markup: dict = None):
@@ -122,16 +136,34 @@ def root():
     return jsonify({"status": "ok"})
 
 
+@app.route("/callback")
+def oauth_callback():
+    code = request.args.get("code", "")
+    state = request.args.get("state", "")
+    full_url = request.url
+    return (
+        f"<h2>OAuth Callback</h2>"
+        f"<p><b>Code:</b> <code>{code}</code></p>"
+        f"<p><b>State:</b> <code>{state}</code></p>"
+        f"<p><b>Full URL:</b> <code>{full_url}</code></p>",
+        200,
+    )
+
+
 @app.route("/api/debug")
 def debug():
+    _require_cron_secret()
     import router as r_module
     import inspect
     src = inspect.getsource(r_module.route_message)
-    return jsonify({"router_keywords": src[:500], "ical": os.getenv("GOOGLE_CALENDAR_ICAL_URL", "NOT SET")[:50]})
+    return jsonify({"router_keywords": src[:500]})
 
 
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
+    if WEBHOOK_SECRET:
+        if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+            return jsonify({"ok": False}), 403
     data = request.get_json(silent=True) or {}
 
     # Gestione callback_query (click su bottone inline)
@@ -207,6 +239,7 @@ def webhook():
 
 @app.route("/api/test-webhook-full")
 def test_webhook_full():
+    _require_cron_secret()
     """Simula webhook completo con 'ultime spese' + send_telegram."""
     import time
     t0 = time.time()
@@ -224,6 +257,7 @@ def test_webhook_full():
 
 @app.route("/api/test-pending")
 def test_pending():
+    _require_cron_secret()
     """Debug: salva pending test, poi legge, poi cancella."""
     from agents.pending import save_pending, get_pending, clear_pending
     import time
@@ -244,6 +278,7 @@ def test_pending():
 
 @app.route("/api/morning")
 def morning():
+    _require_cron_secret()
     briefing = asyncio.run(get_morning_briefing())
     send_telegram(briefing)
     return jsonify({"ok": True})
@@ -251,6 +286,7 @@ def morning():
 
 @app.route("/api/debug-news")
 def debug_news():
+    _require_cron_secret()
     import xml.etree.ElementTree as ET
     feeds = [
         "https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml",
@@ -273,6 +309,7 @@ def debug_news():
 
 @app.route("/api/test-recent")
 def test_recent():
+    _require_cron_secret()
     """Debug get_recent_transactions — bypassa routing."""
     import time
     t0 = time.time()
@@ -288,6 +325,7 @@ def test_recent():
 
 @app.route("/api/test-route")
 def test_route():
+    _require_cron_secret()
     """Debug routing — simula messaggio 'ultime spese'."""
     import time
     t0 = time.time()
@@ -302,6 +340,7 @@ def test_route():
 
 @app.route("/api/test-morning")
 def test_morning():
+    _require_cron_secret()
     """Test manuale briefing — chiama questo per verificare che funzioni."""
     now = datetime.now(ROME)
     briefing = asyncio.run(get_morning_briefing())
@@ -311,6 +350,7 @@ def test_morning():
 
 @app.route("/api/evening")
 def evening():
+    _require_cron_secret()
     alerts = asyncio.run(get_budget_alerts())
     if alerts:
         send_telegram(format_alerts(alerts))
@@ -319,47 +359,83 @@ def evening():
 
 @app.route("/api/tick")
 def tick():
-    """Job unico ogni 30 min — gestisce morning, evening e reminders."""
+    _require_cron_secret()
+    """Job unico ogni 5 min — gestisce morning, evening e reminders."""
     now = datetime.now(ROME)
     h, m = now.hour, now.minute
     done = []
 
-    # Briefing mattutino: 09:00–09:06 (finestra stretta, 1 tick max)
-    if h == 9 and 0 <= m <= 4:
+    # Briefing mattutino: 09:00 esatto
+    if h == 9 and m == 0:
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
 
     # Inizio mese: 1° giorno alle 09:00
-    if now.day == 1 and h == 9 and 0 <= m <= 4:
-        mese = now.strftime("%B %Y")
+    if now.day == 1 and h == 9 and m == 0:
+        mese = mese_anno_it(now)
         send_telegram(f"🗓️ *Nuovo mese!* Benvenuto in {mese} — budget resettato a zero. Buona fortuna! 💪")
         done.append("new_month")
 
-    # Budget serale: 20:00–20:06
-    if h == 20 and 0 <= m <= 4:
+    # Budget serale: 20:00 esatto
+    if h == 20 and m == 0:
         alerts = asyncio.run(get_budget_alerts())
         if alerts:
             send_telegram(format_alerts(alerts))
         done.append("evening")
 
-    # Riepilogo settimanale: domenica 20:00 (weekday==6)
-    if now.weekday() == 6 and (h == 20 and m <= 15) or (now.weekday() == 6 and h == 19 and m >= 45):
+    # Riepilogo settimanale: domenica 20:00
+    if now.weekday() == 6 and h == 20 and m == 0:
         weekly = asyncio.run(get_weekly_spending())
-        send_telegram(format_weekly_summary(weekly))
+        msg = format_weekly_summary(weekly)
+        digest = asyncio.run(get_food_digest(days_back=7))
+        msg += format_food_digest(digest)
+        send_telegram(msg)
         done.append("weekly")
+
+        anomalies = asyncio.run(get_spending_anomalies())
+        if anomalies:
+            send_telegram("📊 *Spese anomale questo mese*\n\n" + "\n".join(anomalies))
+            done.append(f"anomalies:{len(anomalies)}")
+
+    # Reminder abbonamenti e rate BNPL in scadenza: ogni giorno alle 09:00
+    if h == 9 and m == 0:
+        sub_msgs = asyncio.run(check_subscription_reminders())
+        for sm in sub_msgs:
+            send_telegram(sm)
+        if sub_msgs:
+            done.append(f"sub_reminders:{len(sub_msgs)}")
+
+        bnpl_msgs = asyncio.run(check_commitment_reminders())
+        for bm in bnpl_msgs:
+            send_telegram(bm)
+        if bnpl_msgs:
+            done.append(f"bnpl_reminders:{len(bnpl_msgs)}")
+
+        loan_msgs = asyncio.run(check_loan_reminders())
+        for lm in loan_msgs:
+            send_telegram(lm)
+        if loan_msgs:
+            done.append(f"loan_reminders:{len(loan_msgs)}")
 
     # Riepilogo mensile: ultimo giorno del mese alle 20:00
     import calendar as cal_mod
     last_day = cal_mod.monthrange(now.year, now.month)[1]
-    if now.day == last_day and ((h == 20 and m <= 15) or (h == 19 and m >= 45)):
+    if now.day == last_day and h == 20 and m == 0:
         monthly = asyncio.run(get_monthly_spending())
         alerts = asyncio.run(get_budget_alerts())
-        msg = f"📅 *Riepilogo {now.strftime('%B %Y')}*\n\n" + format_spending_summary(monthly)
+        msg = f"📅 *Riepilogo {mese_anno_it(now)}*\n\n" + format_spending_summary(monthly)
         if alerts:
             msg += "\n\n" + format_alerts(alerts)
         send_telegram(msg)
+        send_telegram("📊 Fine mese: quanto hai su Fineco (patrimonio ETF)? Rispondimi con l'importo per calcolare il patrimonio totale.")
+        asyncio.run(save_pending("fineco_balance", {}))
         done.append("monthly")
+
+    # Sync banca Enable Banking: ogni 2h esatte (00, 02, 04...)
+    if h % 2 == 0 and m == 0:
+        result = asyncio.run(sync_transactions(days_back=3))
+        done.append(f"bank_sync:{result.get('saved', 0)}saved")
 
     # Reminders eventi calendario
     done.extend(_check_reminders(now))
@@ -371,36 +447,50 @@ def tick():
         asyncio.run(mark_sent(rem["id"]))
         done.append(f"reminder:{rem['text']}")
 
+    # OAuth Enable Banking: avvisa 5 giorni prima della scadenza
+    days_left = session_expiry_days()
+    if 0 <= days_left <= 5 and h == 9 and m == 0:
+        send_telegram(
+            f"⚠️ *Enable Banking* scade tra {days_left} giorni ({days_left + 1}/09).\n"
+            f"Rinnova l'autorizzazione Isybank per non perdere il sync automatico."
+        )
+        done.append("eb_expiry_reminder")
+
     return jsonify({"ok": True, "done": done})
+
+
+@app.route("/api/sync-bank")
+def sync_bank():
+    _require_cron_secret()
+    result = asyncio.run(sync_transactions(days_back=3))
+    return jsonify({"ok": True, **result})
 
 
 def _check_reminders(now: datetime) -> list[str]:
     events = get_upcoming_events(hours_ahead=26)
     sent = []
     h, m = now.hour, now.minute
-    total_min = h * 60 + m
 
     for ev in events:
         start = ev["start"]
         title = ev["title"]
         minutes_until = (start - now).total_seconds() / 60
 
-        # Giorno prima: 20:00–20:06
         tomorrow = (now + timedelta(days=1)).date()
-        if start.date() == tomorrow and h == 20 and 0 <= m <= 4:
+        # Giorno prima: 20:00 esatto (1 sola notifica anche se cron gira ogni minuto)
+        if start.date() == tomorrow and h == 20 and m == 0:
             send_telegram(f"📅 Domani alle *{start.strftime('%H:%M')}*: *{title}*")
             sent.append(f"day_before:{title}")
 
-        # 2 ore prima: 118–124 min (finestra 6 min centrata su 120)
-        elif 118 <= minutes_until <= 124:
+        # 2 ore prima: finestra 2 min (119-121) — cron ogni minuto = max 1 hit
+        elif 119 <= minutes_until <= 121:
             send_telegram(f"⏰ Tra 2 ore: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"2h:{title}")
 
-        # 1 ora prima: 58–64 min (finestra 6 min centrata su 60)
-        elif 58 <= minutes_until <= 64:
+        # 1 ora prima: finestra 2 min (59-61)
+        elif 59 <= minutes_until <= 61:
             send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"1h:{title}")
-
 
     return sent
 
