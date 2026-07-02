@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 .python-version
+
+.vercel
+screen/
+.feature_suggestions.log
