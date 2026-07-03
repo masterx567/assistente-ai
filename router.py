@@ -54,9 +54,19 @@ async def route_message(user_text: str) -> str:
         note = note_match.group(1).strip(" ,.-") if note_match else ""
         return await add_journal_entry(note or "Cedimento.", cedimento=True)
 
-    # Lettura diario: "mostra diario ..." / "rileggi diario ..." — controllalo prima del salvataggio
-    if any(w in text_lower for w in ["mostra diario", "rileggi diario"]):
-        entries, start, end = await get_journal_entries(text_lower)
+    # Lettura diario: "mostra/rileggi diario <periodo>" oppure "diario di/del <periodo>" (solo periodo, non prosa)
+    _period_only_re = _re.compile(
+        r"^(di |del |della |questo |questa |ultima |ultimo |per )*"
+        r"(settimana( scorsa)?|mese( scorso)?|gennaio|febbraio|marzo|aprile|maggio|giugno|"
+        r"luglio|agosto|settembre|ottobre|novembre|dicembre)\.?$"
+    )
+    _explicit_read = _re.match(r"^\s*(mostra|rileggi)\s+diario\s+(.+)", text_lower, _re.DOTALL)
+    _bare_diario = _re.match(r"^\s*diario\s*[:.,]?\s*(.+)", text_lower, _re.DOTALL)
+    if _explicit_read:
+        entries, start, end = await get_journal_entries(_explicit_read.group(2).strip())
+        return format_journal_entries(entries, start, end)
+    if _bare_diario and _period_only_re.match(_bare_diario.group(1).strip()):
+        entries, start, end = await get_journal_entries(_bare_diario.group(1).strip())
         return format_journal_entries(entries, start, end)
 
     # Diario libero: "diario: <testo>" / "diario. <testo>" / "diario <testo>"

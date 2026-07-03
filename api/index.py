@@ -18,7 +18,7 @@ from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
 from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions, session_expiry_days
-from agents.pending import save_pending
+from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.journal import get_streak_days, format_streak_message
 
 app = Flask(__name__)
@@ -366,33 +366,40 @@ def tick():
     h, m = now.hour, now.minute
     done = []
 
+    def _once(key: str) -> bool:
+        """True se questa azione (key) non è ancora stata eseguita oggi — deduplica retry di cron-job.org."""
+        if asyncio.run(already_ticked(key)):
+            return False
+        asyncio.run(mark_ticked(key))
+        return True
+
     # Briefing mattutino: 09:00 esatto
-    if h == 9 and m == 0:
+    if h == 9 and m == 0 and _once(f"morning:{now.date()}"):
         briefing = asyncio.run(get_morning_briefing())
         send_telegram(briefing)
         done.append("morning")
 
     # Incoraggiamento streak dipendenza: 09:00 / 14:00 / 21:00
-    if (h in (9, 14, 21)) and m == 0:
+    if (h in (9, 14, 21)) and m == 0 and _once(f"streak:{now.date()}:{h}"):
         days = asyncio.run(get_streak_days())
         send_telegram(format_streak_message(days))
         done.append(f"streak:{days}")
 
     # Inizio mese: 1° giorno alle 09:00
-    if now.day == 1 and h == 9 and m == 0:
+    if now.day == 1 and h == 9 and m == 0 and _once(f"new_month:{now.date()}"):
         mese = mese_anno_it(now)
         send_telegram(f"🗓️ *Nuovo mese!* Benvenuto in {mese} — budget resettato a zero. Buona fortuna! 💪")
         done.append("new_month")
 
     # Budget serale: 20:00 esatto
-    if h == 20 and m == 0:
+    if h == 20 and m == 0 and _once(f"evening:{now.date()}"):
         alerts = asyncio.run(get_budget_alerts())
         if alerts:
             send_telegram(format_alerts(alerts))
         done.append("evening")
 
     # Riepilogo settimanale: domenica 20:00
-    if now.weekday() == 6 and h == 20 and m == 0:
+    if now.weekday() == 6 and h == 20 and m == 0 and _once(f"weekly:{now.date()}"):
         weekly = asyncio.run(get_weekly_spending())
         msg = format_weekly_summary(weekly)
         digest = asyncio.run(get_food_digest(days_back=7))
@@ -406,7 +413,7 @@ def tick():
             done.append(f"anomalies:{len(anomalies)}")
 
     # Reminder abbonamenti e rate BNPL in scadenza: ogni giorno alle 09:00
-    if h == 9 and m == 0:
+    if h == 9 and m == 0 and _once(f"reminders9:{now.date()}"):
         sub_msgs = asyncio.run(check_subscription_reminders())
         for sm in sub_msgs:
             send_telegram(sm)
@@ -428,7 +435,7 @@ def tick():
     # Riepilogo mensile: ultimo giorno del mese alle 20:00
     import calendar as cal_mod
     last_day = cal_mod.monthrange(now.year, now.month)[1]
-    if now.day == last_day and h == 20 and m == 0:
+    if now.day == last_day and h == 20 and m == 0 and _once(f"monthly:{now.date()}"):
         monthly = asyncio.run(get_monthly_spending())
         alerts = asyncio.run(get_budget_alerts())
         msg = f"📅 *Riepilogo {mese_anno_it(now)}*\n\n" + format_spending_summary(monthly)
@@ -456,7 +463,7 @@ def tick():
 
     # OAuth Enable Banking: avvisa 5 giorni prima della scadenza
     days_left = session_expiry_days()
-    if 0 <= days_left <= 5 and h == 9 and m == 0:
+    if 0 <= days_left <= 5 and h == 9 and m == 0 and _once(f"eb_expiry:{now.date()}"):
         send_telegram(
             f"⚠️ *Enable Banking* scade tra {days_left} giorni ({days_left + 1}/09).\n"
             f"Rinnova l'autorizzazione Isybank per non perdere il sync automatico."
@@ -484,18 +491,21 @@ def _check_reminders(now: datetime) -> list[str]:
         minutes_until = (start - now).total_seconds() / 60
 
         tomorrow = (now + timedelta(days=1)).date()
-        # Giorno prima: 20:00 esatto (1 sola notifica anche se cron gira ogni minuto)
-        if start.date() == tomorrow and h == 20 and m == 0:
+        # Giorno prima: 20:00 esatto
+        if start.date() == tomorrow and h == 20 and m == 0 and asyncio.run(already_ticked(f"day_before:{title}:{now.date()}")) is False:
+            asyncio.run(mark_ticked(f"day_before:{title}:{now.date()}"))
             send_telegram(f"📅 Domani alle *{start.strftime('%H:%M')}*: *{title}*")
             sent.append(f"day_before:{title}")
 
-        # 2 ore prima: finestra 2 min (119-121) — cron ogni minuto = max 1 hit
-        elif 119 <= minutes_until <= 121:
+        # 2 ore prima: finestra 2 min (119-121)
+        elif 119 <= minutes_until <= 121 and asyncio.run(already_ticked(f"2h:{title}:{start.isoformat()}")) is False:
+            asyncio.run(mark_ticked(f"2h:{title}:{start.isoformat()}"))
             send_telegram(f"⏰ Tra 2 ore: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"2h:{title}")
 
         # 1 ora prima: finestra 2 min (59-61)
-        elif 59 <= minutes_until <= 61:
+        elif 59 <= minutes_until <= 61 and asyncio.run(already_ticked(f"1h:{title}:{start.isoformat()}")) is False:
+            asyncio.run(mark_ticked(f"1h:{title}:{start.isoformat()}"))
             send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"1h:{title}")
 

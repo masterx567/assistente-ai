@@ -848,7 +848,13 @@ async def check_commitment_reminders() -> list[str]:
         name = name_parts[0]["plain_text"] if name_parts else "?"
         installment = props.get("monthly_installment", {}).get("number") or 0
         remaining = props.get("amount_remaining", {}).get("number") or 0
-        due = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]
+        due_iso = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]
+        due = "n/d"
+        if due_iso:
+            try:
+                due = date.fromisoformat(due_iso).strftime("%d/%m/%Y")
+            except ValueError:
+                due = due_iso
         messages.append(f"💳 *{name}*: rata ~€{installment:.2f} prevista il {due} (rimangono €{remaining:.2f}).")
     return messages
 

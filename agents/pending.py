@@ -56,3 +56,28 @@ async def clear_pending(page_id: str):
     async with httpx.AsyncClient(timeout=10) as client:
         await client.patch(f"https://api.notion.com/v1/pages/{page_id}",
             headers=HEADERS, json={"properties": {"sent": {"checkbox": True}}})
+
+
+async def already_ticked(key: str) -> bool:
+    """Controlla se un'azione tick (identificata da key, es. 'evening:2026-07-02') è già stata eseguita.
+    Serve a deduplicare invii doppi/tripli se cron-job.org ritenta la chiamata su timeout."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_REMINDERS}/query",
+            headers=HEADERS, json={
+                "filter": {"property": "text", "title": {"equals": f"TICKLOCK:{key}"}},
+                "page_size": 1,
+            })
+    return bool(r.json().get("results"))
+
+
+async def mark_ticked(key: str):
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json={
+            "parent": {"database_id": DB_REMINDERS},
+            "properties": {
+                "text": {"title": [{"text": {"content": f"TICKLOCK:{key}"}}]},
+                "remind_at": {"date": {"start": now_str}},
+                "sent": {"checkbox": True},
+            }
+        })
