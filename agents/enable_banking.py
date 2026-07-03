@@ -287,6 +287,34 @@ async def _upsert_bnpl_commitment(merchant: str, amount: float, booking_date: st
 
 # ── Enable Banking fetch ──────────────────────────────────────────────────────
 
+_BALANCE_TYPE_PRIORITY = ("interimAvailable", "expected", "closingBooked", "openingBooked")
+
+
+async def _fetch_balance() -> float | None:
+    """Legge il saldo conto corrente da Enable Banking (standard Berlin Group/PSD2)."""
+    if not EB_SESSION_ID or not EB_PRIVATE_KEY:
+        return None
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.get(f"{EB_API}/accounts/{EB_ACCOUNT_UID}/balances", headers=_eb_headers())
+    if r.status_code != 200:
+        return None
+    balances = r.json().get("balances", [])
+    if not balances:
+        return None
+    by_type = {b.get("balance_type"): b for b in balances}
+    for btype in _BALANCE_TYPE_PRIORITY:
+        b = by_type.get(btype)
+        if b:
+            try:
+                return float(b["balance_amount"]["amount"])
+            except (KeyError, ValueError, TypeError):
+                continue
+    try:
+        return float(balances[0]["balance_amount"]["amount"])
+    except (KeyError, ValueError, TypeError, IndexError):
+        return None
+
+
 async def _fetch_transactions(days_back: int = 3) -> list[dict]:
     if not EB_SESSION_ID or not EB_PRIVATE_KEY:
         return []
@@ -314,10 +342,17 @@ async def _fetch_transactions(days_back: int = 3) -> list[dict]:
 # ── Main sync ─────────────────────────────────────────────────────────────────
 
 async def sync_transactions(days_back: int = 3) -> dict:
-    """Full pipeline: fetch → dedup → categorize → save. Returns stats."""
+    """Full pipeline: saldo conto + fetch → dedup → categorize → save. Returns stats."""
+    from agents.budget import save_account_balance
+
+    balance = await _fetch_balance()
+    if balance is not None:
+        await save_account_balance("Isybank", balance, "bank")
+
     txs = await _fetch_transactions(days_back)
     if not txs:
-        return {"fetched": 0, "saved": 0, "skipped": 0, "error": "No transactions or missing config"}
+        return {"fetched": 0, "saved": 0, "skipped": 0, "balance_synced": balance is not None,
+                "error": "No transactions or missing config"}
 
     cats = await _get_categories()  # {name: page_id}
     saved = skipped = 0
@@ -352,7 +387,7 @@ async def sync_transactions(days_back: int = 3) -> dict:
         await _tx_save(tx, merchant, category_id)
         saved += 1
 
-    return {"fetched": len(txs), "saved": saved, "skipped": skipped}
+    return {"fetched": len(txs), "saved": saved, "skipped": skipped, "balance_synced": balance is not None}
 
 
 # ── OAuth reminder ────────────────────────────────────────────────────────────
