@@ -44,18 +44,47 @@ def _require_cron_secret():
         abort(403)
 
 
+def _chunk_text(text: str, limit: int = 4000) -> list[str]:
+    """Spezza il testo in blocchi ≤limit, preferendo confini di paragrafo (\\n\\n)."""
+    if len(text) <= limit:
+        return [text]
+    chunks = []
+    current = ""
+    for para in text.split("\n\n"):
+        candidate = f"{current}\n\n{para}" if current else para
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        if len(para) <= limit:
+            current = para
+        else:
+            for i in range(0, len(para), limit):
+                chunks.append(para[i:i + limit])
+            current = ""
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def send_telegram(text: str, reply_markup: dict = None):
+    """Manda un messaggio Telegram. Se supera 4096 caratteri lo spezza in più invii
+    (il limite dell'API), i bottoni (reply_markup) vanno solo sull'ultimo blocco."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
+    chunks = _chunk_text(text)
     with httpx.Client(timeout=9) as c:
-        r = c.post(url, json=payload)
-        if not r.json().get("ok"):
-            plain = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
-            if reply_markup:
-                plain["reply_markup"] = reply_markup
-            c.post(url, json=plain)
+        for i, chunk in enumerate(chunks):
+            is_last = i == len(chunks) - 1
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "Markdown"}
+            if reply_markup and is_last:
+                payload["reply_markup"] = reply_markup
+            r = c.post(url, json=payload)
+            if not r.json().get("ok"):
+                plain = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk}
+                if reply_markup and is_last:
+                    plain["reply_markup"] = reply_markup
+                c.post(url, json=plain)
 
 
 def transcribe_voice(file_id: str, filename: str = "voice.ogg") -> str | None:
@@ -373,23 +402,52 @@ def tick():
         asyncio.run(mark_ticked(key))
         return True
 
-    # Briefing mattutino: 09:00 esatto
-    if h == 9 and m == 0 and _once(f"morning:{now.date()}"):
-        briefing = asyncio.run(get_morning_briefing())
-        send_telegram(briefing)
-        done.append("morning")
+    # Blocco unico 09:00: streak + nuovo mese + reminder abbonamenti/BNPL/prestiti +
+    # scadenza Enable Banking + briefing mattutino — un solo messaggio Telegram
+    if h == 9 and m == 0 and _once(f"morning9:{now.date()}"):
+        parts = []
 
-    # Incoraggiamento streak dipendenza: 09:00 / 14:00 / 21:00
-    if (h in (9, 14, 21)) and m == 0 and _once(f"streak:{now.date()}:{h}"):
+        days = asyncio.run(get_streak_days())
+        parts.append(format_streak_message(days))
+
+        if now.day == 1:
+            mese = mese_anno_it(now)
+            parts.append(f"🗓️ *Nuovo mese!* Benvenuto in {mese} — budget resettato a zero. Buona fortuna! 💪")
+
+        sub_msgs = asyncio.run(check_subscription_reminders())
+        parts.extend(sub_msgs)
+        if sub_msgs:
+            done.append(f"sub_reminders:{len(sub_msgs)}")
+
+        bnpl_msgs = asyncio.run(check_commitment_reminders())
+        parts.extend(bnpl_msgs)
+        if bnpl_msgs:
+            done.append(f"bnpl_reminders:{len(bnpl_msgs)}")
+
+        loan_msgs = asyncio.run(check_loan_reminders())
+        parts.extend(loan_msgs)
+        if loan_msgs:
+            done.append(f"loan_reminders:{len(loan_msgs)}")
+
+        days_left = session_expiry_days()
+        if 0 <= days_left <= 5:
+            parts.append(
+                f"⚠️ *Enable Banking* scade tra {days_left} giorni ({days_left + 1}/09).\n"
+                f"Rinnova l'autorizzazione Isybank per non perdere il sync automatico."
+            )
+            done.append("eb_expiry_reminder")
+
+        briefing = asyncio.run(get_morning_briefing())
+        parts.append(briefing)
+
+        send_telegram("\n\n━━━━━━━━━━━━━━━\n\n".join(parts))
+        done.append("morning9")
+
+    # Incoraggiamento streak dipendenza: 14:00 / 21:00 (09:00 incluso nel blocco sopra)
+    if (h in (14, 21)) and m == 0 and _once(f"streak:{now.date()}:{h}"):
         days = asyncio.run(get_streak_days())
         send_telegram(format_streak_message(days))
         done.append(f"streak:{days}")
-
-    # Inizio mese: 1° giorno alle 09:00
-    if now.day == 1 and h == 9 and m == 0 and _once(f"new_month:{now.date()}"):
-        mese = mese_anno_it(now)
-        send_telegram(f"🗓️ *Nuovo mese!* Benvenuto in {mese} — budget resettato a zero. Buona fortuna! 💪")
-        done.append("new_month")
 
     # Budget serale: 20:00 esatto
     if h == 20 and m == 0 and _once(f"evening:{now.date()}"):
@@ -411,26 +469,6 @@ def tick():
         if anomalies:
             send_telegram("📊 *Spese anomale questo mese*\n\n" + "\n".join(anomalies))
             done.append(f"anomalies:{len(anomalies)}")
-
-    # Reminder abbonamenti e rate BNPL in scadenza: ogni giorno alle 09:00
-    if h == 9 and m == 0 and _once(f"reminders9:{now.date()}"):
-        sub_msgs = asyncio.run(check_subscription_reminders())
-        for sm in sub_msgs:
-            send_telegram(sm)
-        if sub_msgs:
-            done.append(f"sub_reminders:{len(sub_msgs)}")
-
-        bnpl_msgs = asyncio.run(check_commitment_reminders())
-        for bm in bnpl_msgs:
-            send_telegram(bm)
-        if bnpl_msgs:
-            done.append(f"bnpl_reminders:{len(bnpl_msgs)}")
-
-        loan_msgs = asyncio.run(check_loan_reminders())
-        for lm in loan_msgs:
-            send_telegram(lm)
-        if loan_msgs:
-            done.append(f"loan_reminders:{len(loan_msgs)}")
 
     # Riepilogo mensile: ultimo giorno del mese alle 20:00
     import calendar as cal_mod
@@ -460,15 +498,6 @@ def tick():
         send_telegram(f"🔔 *{rem['text']}*")
         asyncio.run(mark_sent(rem["id"]))
         done.append(f"reminder:{rem['text']}")
-
-    # OAuth Enable Banking: avvisa 5 giorni prima della scadenza
-    days_left = session_expiry_days()
-    if 0 <= days_left <= 5 and h == 9 and m == 0 and _once(f"eb_expiry:{now.date()}"):
-        send_telegram(
-            f"⚠️ *Enable Banking* scade tra {days_left} giorni ({days_left + 1}/09).\n"
-            f"Rinnova l'autorizzazione Isybank per non perdere il sync automatico."
-        )
-        done.append("eb_expiry_reminder")
 
     return jsonify({"ok": True, "done": done})
 
