@@ -10,6 +10,7 @@ from agents.calendar import get_events, get_events_in_range, format_events, add_
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
+from agents.studio import mark_course_done, get_next_course, format_next_course_line
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -514,6 +515,11 @@ async def handle_confirm() -> str | dict:
     elif action == "save_map":
         await save_merchant_map(payload["merchant"], payload["cat_id"])
         return "✅ Merchant salvato nel MerchantMap."
+    elif action == "exam_done":
+        await mark_course_done(payload["course_id"])
+        next_course = await get_next_course()
+        next_line = format_next_course_line(next_course) if next_course else "\n🎓 Piano di studio completato!"
+        return f"✅ Segnato come completato: *{payload['corso']}*.{next_line}"
     return "Azione sconosciuta."
 
 
@@ -542,6 +548,9 @@ async def handle_cancel() -> dict:
                      f"Scegli categoria:"),
             "markup": {"inline_keyboard": rows},
         }
+    if pending["action"] == "exam_done":
+        await clear_pending(pending["id"])
+        return {"text": "Ok, resta da fare — te lo richiedo domani."}
     await clear_pending(pending["id"])
     return {"text": "❌ Annullato."}
 

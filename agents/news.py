@@ -6,6 +6,8 @@ from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from agents.calendar import get_today_events
 from agents.budget import get_budget_alerts, format_alerts
+from agents.studio import get_next_course, format_next_course_line, is_overdue
+from agents.pending import save_pending, get_pending
 
 ROME = ZoneInfo("Europe/Rome")
 
@@ -168,5 +170,14 @@ async def get_morning_briefing() -> str:
         lines.append("━━━━━━━━━━━━━━━")
         lines.append("💸 *BUDGET*")
         lines.append(format_alerts(alerts))
+
+    # 4. Piano di studio
+    next_course = await get_next_course()
+    if next_course:
+        lines.append("━━━━━━━━━━━━━━━")
+        lines.append("🎓 *STUDIO*" + format_next_course_line(next_course))
+        if is_overdue(next_course) and not await get_pending():
+            await save_pending("exam_done", {"course_id": next_course["id"], "corso": next_course["corso"]})
+            lines.append(f"\nHai completato *{next_course['corso']}*? Rispondi sì o no.")
 
     return "\n".join(lines)
