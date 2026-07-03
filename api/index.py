@@ -174,6 +174,22 @@ def oauth_callback():
     )
 
 
+@app.route("/api/debug-balance")
+def debug_balance():
+    """Debug temporaneo: verifica stato quota Enable Banking. Da rimuovere dopo."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, EB_ACCOUNT_UID, EB_SESSION_ID, EB_PRIVATE_KEY, _eb_headers
+    import httpx as _httpx
+    if not EB_SESSION_ID or not EB_PRIVATE_KEY:
+        return jsonify({"ok": False, "error": "missing EB_SESSION_ID or EB_PRIVATE_KEY"})
+    try:
+        with _httpx.Client(timeout=15) as c:
+            r = c.get(f"{EB_API}/accounts/{EB_ACCOUNT_UID}/balances", headers=_eb_headers())
+        return jsonify({"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:1000]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
     if WEBHOOK_SECRET:
