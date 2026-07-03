@@ -341,10 +341,10 @@ async def route_message(user_text: str) -> str:
         briefing = await get_morning_briefing()
         return briefing
 
-    # Ultima spiaggia prima della chat generica: frasi tipo "le ferie", "il dentista"
-    # (articolo + sostantivo, senza verbo) sono quasi sempre una domanda implicita sul
-    # calendario — meglio cercare davvero che lasciare che l'LLM inventi una risposta.
-    if _re.match(r"^(le|il|la|i|gli|lo)\s+\w+", text_lower):
+    # Ultima spiaggia prima della chat generica: frasi corte (≤4 parole) tipo "ferie",
+    # "quando ferie", "le ferie", "il dentista" sono quasi sempre una domanda implicita
+    # sul calendario — meglio cercare davvero che lasciare che l'LLM inventi una risposta.
+    if len(text_lower.split()) <= 4:
         query = await _extract_search_query(user_text)
         if query:
             results = await search_events(query, days_ahead=365)
