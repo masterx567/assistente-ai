@@ -208,6 +208,20 @@ def eb_auth_start():
     return jsonify({"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:1000]})
 
 
+@app.route("/api/eb-auth-finish")
+def eb_auth_finish():
+    """Debug temporaneo: scambia il code con una nuova sessione Enable Banking."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, _eb_headers
+    import httpx as _httpx
+    code = request.args.get("code", "")
+    if not code:
+        return jsonify({"ok": False, "error": "missing code param"})
+    with _httpx.Client(timeout=15) as c:
+        r = c.post(f"{EB_API}/sessions", headers=_eb_headers(), json={"code": code})
+    return jsonify({"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:1000]})
+
+
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
     if WEBHOOK_SECRET:
