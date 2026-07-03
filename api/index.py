@@ -174,6 +174,21 @@ def oauth_callback():
     )
 
 
+@app.route("/api/eb-aspsps")
+def eb_aspsps():
+    """Debug temporaneo: trova l'ASPSP id di Isybank su Enable Banking."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, _eb_headers
+    import httpx as _httpx
+    with _httpx.Client(timeout=15) as c:
+        r = c.get(f"{EB_API}/aspsps", headers=_eb_headers())
+    if r.status_code != 200:
+        return jsonify({"status": r.status_code, "body": r.text[:1000]})
+    aspsps = r.json().get("aspsps", [])
+    matches = [a for a in aspsps if "isybank" in a.get("name", "").lower() or "isy" in a.get("name", "").lower()]
+    return jsonify({"count": len(aspsps), "matches": matches})
+
+
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
     if WEBHOOK_SECRET:
