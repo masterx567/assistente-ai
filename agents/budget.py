@@ -16,7 +16,6 @@ def mese_anno_it(d) -> str:
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DB_TRANSACTIONS = os.getenv("NOTION_DB_TRANSACTIONS")
 DB_CATEGORIES = os.getenv("NOTION_DB_CATEGORIES")
-DB_MERCHANTMAP = "c82a1f2a-a1dc-421b-aeb8-e0fc4e413354"
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -39,12 +38,6 @@ async def _get_all_category_names() -> dict[str, str]:
         if name:
             result[c["id"]] = name
     return result
-
-
-async def get_all_categories() -> list[dict]:
-    """Ritorna lista [{id, name}] di tutte le categorie."""
-    names = await _get_all_category_names()
-    return [{"id": k, "name": v} for k, v in sorted(names.items(), key=lambda x: x[1])]
 
 
 async def _get_spending(year: int, month: int) -> dict:
@@ -197,102 +190,6 @@ async def get_weekly_spending() -> dict:
         cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
         spending[cat_name] = spending.get(cat_name, 0) + abs(amount)
     return spending
-
-
-async def _lookup_merchant_category(merchant: str) -> str | None:
-    """Cerca merchant nel MerchantMap, ritorna category_id o None."""
-    merchant_upper = merchant.upper().strip()
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"https://api.notion.com/v1/databases/{DB_MERCHANTMAP}/query", headers=HEADERS, json={"page_size": 100})
-    for m in r.json().get("results", []):
-        name_parts = m["properties"].get("merchant_raw", {}).get("title", [])
-        name = name_parts[0]["plain_text"].upper() if name_parts else ""
-        cat_rel = m["properties"].get("category", {}).get("relation", [])
-        if cat_rel and (name == merchant_upper or name in merchant_upper or merchant_upper in name):
-            return cat_rel[0]["id"]
-    return None
-
-
-async def lookup_merchant(merchant: str) -> dict:
-    """Cerca merchant nel MerchantMap, ritorna {cat_id, cat_name}."""
-    cat_id = await _lookup_merchant_category(merchant)
-    if cat_id:
-        cat_names = await _get_all_category_names()
-        return {"cat_id": cat_id, "cat_name": cat_names.get(cat_id, "Senza categoria")}
-    return {"cat_id": None, "cat_name": "Senza categoria"}
-
-
-async def save_merchant_map(merchant: str, cat_id: str) -> bool:
-    """Aggiunge voce nel MerchantMap."""
-    body = {
-        "parent": {"database_id": DB_MERCHANTMAP},
-        "properties": {
-            "merchant_raw": {"title": [{"text": {"content": merchant.upper().strip()}}]},
-            "category": {"relation": [{"id": cat_id}]},
-        }
-    }
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json=body)
-    return r.status_code == 200
-
-
-async def add_transaction(merchant: str, amount: float, date_str: str = None, cat_id: str = None) -> str:
-    """Aggiunge transazione in Notion. cat_id opzionale: se None fa lookup MerchantMap."""
-    if date_str is None:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-    if cat_id is None:
-        cat_id = await _lookup_merchant_category(merchant)
-    body = {
-        "parent": {"database_id": DB_TRANSACTIONS},
-        "properties": {
-            "Name": {"title": [{"text": {"content": merchant}}]},
-            "merchant_raw": {"rich_text": [{"text": {"content": merchant}}]},
-            "amount": {"number": -abs(amount)},
-            "date": {"date": {"start": date_str}},
-        }
-    }
-    if cat_id:
-        body["properties"]["category"] = {"relation": [{"id": cat_id}]}
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json=body)
-    if r.status_code == 200:
-        cat_names = await _get_all_category_names()
-        cat_label = cat_names.get(cat_id, "Senza categoria") if cat_id else "Senza categoria"
-        return f"✅ Aggiunta: *{merchant}* -€{abs(amount):.2f} → {cat_label}"
-    return f"Errore aggiunta transazione: {r.status_code}"
-
-
-async def delete_transaction(merchant: str, amount: float = None, date_str: str = None) -> str:
-    """Cerca e cancella una transazione in Notion per merchant (+ opzionale amount/date)."""
-    filters = [{"property": "merchant_raw", "rich_text": {"contains": merchant}}]
-    if amount:
-        filters.append({"property": "amount", "number": {"equals": -abs(amount)}})
-    if date_str:
-        filters.append({"property": "date", "date": {"equals": date_str}})
-
-    body = {
-        "filter": {"and": filters} if len(filters) > 1 else filters[0],
-        "sorts": [{"property": "date", "direction": "descending"}],
-        "page_size": 5,
-    }
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
-    results = r.json().get("results", [])
-    if not results:
-        return f"Nessuna transazione trovata con '{merchant}'."
-
-    page = results[0]
-    page_id = page["id"]
-    props = page["properties"]
-    amt = props.get("amount", {}).get("number", 0)
-    mr = props.get("merchant_raw", {}).get("rich_text", [])
-    name = mr[0]["plain_text"] if mr else merchant
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        r2 = await client.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True})
-    if r2.status_code == 200:
-        return f"🗑️ Eliminata: *{name}* €{abs(amt):.2f}"
-    return f"Errore eliminazione: {r2.status_code}"
 
 
 async def get_recent_transactions(limit: int = 10) -> list[dict]:

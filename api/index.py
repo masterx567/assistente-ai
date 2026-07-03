@@ -12,7 +12,7 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from router import route_message, handle_category_callback
+from router import route_message
 from agents.errors import log_error
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
@@ -108,12 +108,6 @@ def transcribe_voice(file_id: str, filename: str = "voice.ogg") -> str | None:
     return r2.json().get("text", "").strip() or None
 
 
-def answer_callback(callback_query_id: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
-    with httpx.Client(timeout=5) as c:
-        c.post(url, json={"callback_query_id": callback_query_id})
-
-
 def get_access_token() -> str | None:
     if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN]):
         return None
@@ -180,61 +174,12 @@ def oauth_callback():
     )
 
 
-@app.route("/api/debug")
-def debug():
-    _require_cron_secret()
-    import router as r_module
-    import inspect
-    src = inspect.getsource(r_module.route_message)
-    return jsonify({"router_keywords": src[:500]})
-
-
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
     if WEBHOOK_SECRET:
         if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
             return jsonify({"ok": False}), 403
     data = request.get_json(silent=True) or {}
-
-    # Gestione callback_query (click su bottone inline)
-    callback = data.get("callback_query")
-    if callback:
-        cb_chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
-        cb_data = callback.get("data", "")
-        cb_id = callback.get("id", "")
-        answer_callback(cb_id)
-        if cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("sc:"):
-            try:
-                cat_index = int(cb_data.split(":")[1])
-                result = asyncio.run(handle_category_callback(cat_index))
-            except Exception as e:
-                result = {"text": f"Errore: {str(e)}"}
-            send_telegram(result["text"], result.get("markup"))
-        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("sm:"):
-            save = cb_data.split(":")[1] == "1"
-            if save:
-                try:
-                    from agents.pending import get_pending, clear_pending
-                    from agents.budget import save_merchant_map
-                    p = asyncio.run(get_pending())
-                    if p and p["action"] == "save_map":
-                        asyncio.run(save_merchant_map(p["payload"]["merchant"], p["payload"]["cat_id"]))
-                        asyncio.run(clear_pending(p["id"]))
-                        send_telegram("✅ Merchant salvato nel MerchantMap.")
-                    else:
-                        send_telegram("Sessione scaduta.")
-                except Exception as e:
-                    send_telegram(f"Errore: {str(e)}")
-            else:
-                try:
-                    from agents.pending import get_pending, clear_pending
-                    p = asyncio.run(get_pending())
-                    if p:
-                        asyncio.run(clear_pending(p["id"]))
-                except Exception:
-                    pass
-                send_telegram("Ok, non salvato.")
-        return jsonify({"ok": True})
 
     # Gestione messaggio normale
     message = data.get("message", {})
@@ -264,126 +209,6 @@ def webhook():
         else:
             send_telegram(reply)
 
-    return jsonify({"ok": True})
-
-
-@app.route("/api/test-webhook-full")
-def test_webhook_full():
-    _require_cron_secret()
-    """Simula webhook completo con 'ultime spese' + send_telegram."""
-    import time
-    t0 = time.time()
-    text = "ultime spese"
-    try:
-        reply = asyncio.run(route_message(text))
-        elapsed_route = round(time.time() - t0, 2)
-        send_telegram(reply)
-        elapsed_total = round(time.time() - t0, 2)
-        return jsonify({"ok": True, "elapsed_route_s": elapsed_route, "elapsed_total_s": elapsed_total,
-                        "reply_len": len(reply), "chat_id_env": TELEGRAM_CHAT_ID, "token_set": bool(TELEGRAM_TOKEN)})
-    except Exception as e:
-        return jsonify({"ok": False, "elapsed_s": round(time.time() - t0, 2), "error": str(e)})
-
-
-@app.route("/api/test-pending")
-def test_pending():
-    _require_cron_secret()
-    """Debug: salva pending test, poi legge, poi cancella."""
-    from agents.pending import save_pending, get_pending, clear_pending
-    import time
-    steps = []
-    try:
-        page_id = asyncio.run(save_pending("add_tx", {"merchant": "TEST", "amount": 1.0, "date": "2026-06-25", "cat_id": None}))
-        steps.append({"step": "save", "page_id": page_id})
-        time.sleep(1)
-        pending = asyncio.run(get_pending())
-        steps.append({"step": "get", "result": pending})
-        if pending:
-            asyncio.run(clear_pending(pending["id"]))
-            steps.append({"step": "clear", "ok": True})
-    except Exception as e:
-        steps.append({"step": "error", "msg": str(e)})
-    return jsonify({"steps": steps})
-
-
-@app.route("/api/morning")
-def morning():
-    _require_cron_secret()
-    briefing = asyncio.run(get_morning_briefing())
-    send_telegram(briefing)
-    return jsonify({"ok": True})
-
-
-@app.route("/api/debug-news")
-def debug_news():
-    _require_cron_secret()
-    import xml.etree.ElementTree as ET
-    feeds = [
-        "https://www.ansa.it/sito/notizie/tecnologia/tecnologia_rss.xml",
-        "https://www.corriere.it/rss/tecnologia.xml",
-        "https://punto-informatico.it/feed/",
-        "https://www.hdblog.it/rss/",
-    ]
-    result = {}
-    with httpx.Client(timeout=10) as c:
-        for url in feeds:
-            try:
-                r = c.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                root = ET.fromstring(r.text)
-                titles = [(i.findtext("title",""), i.findtext("pubDate","")) for i in list(root.iter("item"))[:3]]
-                result[url] = {"status": r.status_code, "items": titles}
-            except Exception as e:
-                result[url] = {"error": str(e)}
-    return jsonify(result)
-
-
-@app.route("/api/test-recent")
-def test_recent():
-    _require_cron_secret()
-    """Debug get_recent_transactions — bypassa routing."""
-    import time
-    t0 = time.time()
-    try:
-        from agents.budget import get_recent_transactions
-        txs = asyncio.run(get_recent_transactions(5))
-        elapsed = round(time.time() - t0, 2)
-        return jsonify({"ok": True, "elapsed_s": elapsed, "count": len(txs), "data": txs})
-    except Exception as e:
-        elapsed = round(time.time() - t0, 2)
-        return jsonify({"ok": False, "elapsed_s": elapsed, "error": str(e)})
-
-
-@app.route("/api/test-route")
-def test_route():
-    _require_cron_secret()
-    """Debug routing — simula messaggio 'ultime spese'."""
-    import time
-    t0 = time.time()
-    try:
-        reply = asyncio.run(route_message("ultime spese"))
-        elapsed = round(time.time() - t0, 2)
-        return jsonify({"ok": True, "elapsed_s": elapsed, "reply": reply})
-    except Exception as e:
-        elapsed = round(time.time() - t0, 2)
-        return jsonify({"ok": False, "elapsed_s": elapsed, "error": str(e)})
-
-
-@app.route("/api/test-morning")
-def test_morning():
-    _require_cron_secret()
-    """Test manuale briefing — chiama questo per verificare che funzioni."""
-    now = datetime.now(ROME)
-    briefing = asyncio.run(get_morning_briefing())
-    send_telegram(briefing)
-    return jsonify({"ok": True, "time": now.strftime("%H:%M"), "sent": True})
-
-
-@app.route("/api/evening")
-def evening():
-    _require_cron_secret()
-    alerts = asyncio.run(get_budget_alerts())
-    if alerts:
-        send_telegram(format_alerts(alerts))
     return jsonify({"ok": True})
 
 
@@ -505,13 +330,6 @@ def tick():
     return jsonify({"ok": True, "done": done})
 
 
-@app.route("/api/sync-bank")
-def sync_bank():
-    _require_cron_secret()
-    result = asyncio.run(sync_transactions(days_back=3))
-    return jsonify({"ok": True, **result})
-
-
 def _check_reminders(now: datetime) -> list[str]:
     events = get_upcoming_events(hours_ahead=26)
     sent = []
@@ -542,35 +360,3 @@ def _check_reminders(now: datetime) -> list[str]:
             sent.append(f"1h:{title}")
 
     return sent
-
-
-@app.route("/api/reminders")
-def reminders():
-    now = datetime.now(ROME)
-    events = get_upcoming_events(hours_ahead=26)
-    sent = []
-
-    for ev in events:
-        start = ev["start"]
-        title = ev["title"]
-        minutes_until = (start - now).total_seconds() / 60
-
-        # Giorno prima: notifica alle 20:00 ± 15 min
-        tomorrow = (now + timedelta(days=1)).date()
-        if start.date() == tomorrow and 19 * 60 + 45 <= now.hour * 60 + now.minute <= 20 * 60 + 15:
-            day_str = start.strftime("%A %d/%m")
-            time_str = start.strftime("%H:%M")
-            send_telegram(f"📅 Domani alle *{time_str}*: *{title}*")
-            sent.append(f"day_before:{title}")
-
-        # 2 ore prima: 105–135 min
-        elif 105 <= minutes_until <= 135:
-            send_telegram(f"⏰ Tra 2 ore: *{title}* alle {start.strftime('%H:%M')}")
-            sent.append(f"2h:{title}")
-
-        # 1 ora prima: 45–75 min
-        elif 45 <= minutes_until <= 75:
-            send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
-            sent.append(f"1h:{title}")
-
-    return jsonify({"ok": True, "sent": sent})

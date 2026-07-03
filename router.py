@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, add_transaction, delete_transaction, get_recent_transactions, lookup_merchant, get_category_budgets, get_all_categories, save_merchant_map, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend
 import re as _re
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, get_events_in_range, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
@@ -105,34 +105,18 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in income_kw):
         return await handle_add_income(user_text)
 
-    # Elimina transazione (controlla PRIMA del calendario)
-    del_tx_kw = [
-        "elimina transazione", "elimini transazione", "elimina la transazione",
-        "cancella transazione", "cancelli transazione", "cancella la transazione",
-        "togli transazione", "rimuovi transazione", "rimuovimi transazione",
-        "elimina spesa", "cancella spesa", "togli spesa", "rimuovi spesa",
-        "elimina acquisto", "cancella acquisto",
-    ]
-    if any(w in text_lower for w in del_tx_kw):
-        return await handle_delete_transaction(user_text)
-
-    # Aggiungi transazione da chat (controlla PRIMA del calendario)
-    tx_kw = [
+    # Spese manuali: non più gestite, arrivano dalla sync banca (Enable Banking).
+    # Redirect esplicito invece di lasciar cadere sulla chat generica, che altrimenti
+    # inventa una conferma fasulla senza scrivere nulla.
+    manual_tx_kw = [
         "ho speso", "ho pagato", "ho comprato", "ho acquistato",
-        "spesa di", "pagato ", "speso ", "costato ", "è costato",
-        "crea transazione", "crei transazione", "creami transazione",
-        "aggiungi transazione", "aggiungimi transazione", "inserisci transazione",
-        "nuova transazione", "registra transazione", "segna transazione",
-        "aggiungi spesa", "aggiungimi spesa", "nuova spesa", "inserisci spesa",
+        "aggiungi transazione", "aggiungi spesa", "nuova spesa",
         "registra spesa", "segna spesa", "fatto la spesa",
+        "elimina transazione", "cancella transazione", "elimina spesa",
+        "cancella spesa", "togli spesa", "rimuovi spesa",
     ]
-    _tx_nouns = ["transazione", "spesa", "acquisto", "pagamento"]
-    _tx_verbs = ["crea", "crei", "creami", "aggiungi", "aggiungimi", "inserisci",
-                 "inseriscimi", "registra", "segna", "metti", "mettimi", "aggiungi"]
-    _has_tx_noun = any(w in text_lower for w in _tx_nouns)
-    _has_tx_verb = any(w in text_lower for w in _tx_verbs)
-    if any(w in text_lower for w in tx_kw) or (_has_tx_noun and _has_tx_verb):
-        return await handle_add_transaction(user_text)
+    if any(w in text_lower for w in manual_tx_kw):
+        return "Le spese arrivano automaticamente dalla sync banca, non serve inserirle a mano."
 
     # Prossimi impegni on-demand (oggi / domani)
     today_kw = [
@@ -357,6 +341,21 @@ async def route_message(user_text: str) -> str:
         briefing = await get_morning_briefing()
         return briefing
 
+    # Ultima spiaggia prima della chat generica: frasi tipo "le ferie", "il dentista"
+    # (articolo + sostantivo, senza verbo) sono quasi sempre una domanda implicita sul
+    # calendario — meglio cercare davvero che lasciare che l'LLM inventi una risposta.
+    if _re.match(r"^(le|il|la|i|gli|lo)\s+\w+", text_lower):
+        query = await _extract_search_query(user_text)
+        if query:
+            results = await search_events(query, days_ahead=365)
+            if results:
+                lines = [f"🔍 *Risultati per '{query}':*\n"]
+                for ev in results:
+                    time_str = f" alle {ev['time']}" if ev.get("time") else ""
+                    lines.append(f"• {ev['date'].strftime('%d/%m/%Y')}{time_str}: {ev['title']}")
+                return "\n".join(lines)
+            return f"Nessun evento trovato con '{query}' nei prossimi 12 mesi."
+
     return await ask_groq(user_text, "")
 
 
@@ -421,68 +420,6 @@ async def handle_calendar_action(user_text: str) -> str:
         return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
 
 
-async def handle_add_transaction(user_text: str) -> str:
-    today = datetime.now(ROME)
-    prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
-Estrai dal testo: importo (numero positivo), nome merchant/negozio COMPLETO (includi tutto il nome, es. "mcdonalds test"), data (YYYY-MM-DD, default oggi).
-Rispondi SOLO con JSON: {{"amount": 12.50, "merchant": "McDonald's Test", "date": "2026-06-25"}}
-IMPORTANTE: il merchant è il nome esatto del negozio/servizio scritto nel testo, non inventare.
-Testo: {user_text}"""
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
-                  "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 80, "temperature": 0})
-    raw = r.json()["choices"][0]["message"]["content"].strip()
-    start = raw.find("{"); end = raw.rfind("}") + 1
-    data = json.loads(raw[start:end])
-    merchant = data["merchant"]
-    amount = float(data["amount"])
-    date_str = data.get("date", today.strftime("%Y-%m-%d"))
-    cat = await lookup_merchant(merchant)
-    await save_pending("add_tx", {"merchant": merchant, "amount": amount, "date": date_str, "cat_id": cat["cat_id"]})
-    return (f"➕ Vuoi aggiungere:\n"
-            f"• *{merchant}* -€{amount:.2f}\n"
-            f"• Data: {date_str}\n"
-            f"• Categoria: *{cat['cat_name']}*\n\n"
-            f"Rispondi *sì* per confermare o *no* per annullare.")
-
-
-async def handle_delete_transaction(user_text: str) -> str:
-    today = datetime.now(ROME)
-    prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
-Dal testo estrai: nome merchant/negozio, importo (opzionale), data (opzionale, YYYY-MM-DD).
-IGNORA le parole di comando come: elimina, cancella, transazione, spesa, togli, rimuovi.
-Il merchant è solo il nome del negozio/servizio, non le parole di comando.
-Esempi:
-- "elimina transazione mcdonalds test 3 euro" → {{"merchant": "mcdonalds test", "amount": 3.0}}
-- "cancella spesa netflix" → {{"merchant": "netflix"}}
-- "elimina transazione amazon del 20 giugno" → {{"merchant": "amazon", "date": "2026-06-20"}}
-Rispondi SOLO con JSON. Se importo o data non presenti, ometti il campo.
-Testo: {user_text}"""
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
-                  "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 80, "temperature": 0})
-    raw = r.json()["choices"][0]["message"]["content"].strip()
-    start = raw.find("{"); end = raw.rfind("}") + 1
-    data = json.loads(raw[start:end])
-    merchant = data["merchant"]
-    amount = data.get("amount")
-    date_str = data.get("date")
-    await save_pending("del_tx", {"merchant": merchant, "amount": amount, "date": date_str})
-    details = f"• *{merchant}*"
-    if amount:
-        details += f" €{float(amount):.2f}"
-    if date_str:
-        details += f" del {date_str}"
-    return (f"🗑️ Vuoi eliminare:\n{details}\n\n"
-            f"Rispondi *sì* per confermare o *no* per annullare.")
-
-
 async def handle_confirm() -> str | dict:
     pending = await get_pending()
     if not pending:
@@ -490,31 +427,8 @@ async def handle_confirm() -> str | dict:
     action = pending["action"]
     payload = pending["payload"]
     await clear_pending(pending["id"])
-    if action == "add_tx":
-        result = await add_transaction(payload["merchant"], float(payload["amount"]), payload.get("date"), payload.get("cat_id"))
-        # Offri di salvare nel MerchantMap se merchant non era già mappato
-        original_lookup = await lookup_merchant(payload["merchant"])
-        if payload.get("cat_id") and original_lookup["cat_id"] != payload.get("cat_id"):
-            await save_pending("save_map", {"merchant": payload["merchant"], "cat_id": payload["cat_id"]})
-            cat_names = await get_all_categories()
-            cat_name = next((c["name"] for c in cat_names if c["id"] == payload["cat_id"]), "?")
-            return {
-                "text": (f"{result}\n\n"
-                         f"Vuoi salvare *{payload['merchant']}* → *{cat_name}* nel MerchantMap\n"
-                         f"per le prossime volte?"),
-                "markup": {"inline_keyboard": [[
-                    {"text": "✅ Sì, salva", "callback_data": "sm:1"},
-                    {"text": "❌ No", "callback_data": "sm:0"},
-                ]]}
-            }
-        return result
-    elif action == "del_tx":
-        return await delete_transaction(payload["merchant"], payload.get("amount"), payload.get("date"))
-    elif action == "add_income":
+    if action == "add_income":
         return await add_income(payload["source"], float(payload["amount"]), payload.get("date"))
-    elif action == "save_map":
-        await save_merchant_map(payload["merchant"], payload["cat_id"])
-        return "✅ Merchant salvato nel MerchantMap."
     elif action == "exam_done":
         await mark_course_done(payload["course_id"])
         next_course = await get_next_course()
@@ -527,55 +441,11 @@ async def handle_cancel() -> dict:
     pending = await get_pending()
     if not pending:
         return {"text": "Nessuna azione da annullare."}
-    # Se era add_tx mostra bottoni categoria — NON cancellare ora, lo farà handle_category_callback al click
-    if pending["action"] == "add_tx":
-        payload = pending["payload"]
-        cats = await get_all_categories()
-        # Bottoni a griglia 2 per riga, callback_data = "sc:{index}" (max 5 byte)
-        rows = []
-        row = []
-        for i, c in enumerate(cats):
-            row.append({"text": c["name"], "callback_data": f"sc:{i}"})
-            if len(row) == 2:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        return {
-            "text": (f"❌ Annullato.\n\n"
-                     f"Vuoi riprovare con una categoria diversa?\n"
-                     f"• *{payload['merchant']}* -€{float(payload['amount']):.2f}\n\n"
-                     f"Scegli categoria:"),
-            "markup": {"inline_keyboard": rows},
-        }
     if pending["action"] == "exam_done":
         await clear_pending(pending["id"])
         return {"text": "Ok, resta da fare — te lo richiedo domani."}
     await clear_pending(pending["id"])
     return {"text": "❌ Annullato."}
-
-
-async def handle_category_callback(cat_index: int) -> dict:
-    """Callback quando utente clicca bottone categoria."""
-    pending = await get_pending()
-    if not pending or pending["action"] != "add_tx":
-        return {"text": "Sessione scaduta, rimanda il comando."}
-    await clear_pending(pending["id"])
-    payload = pending["payload"]
-    # Ricarica categorie e prendi quella all'indice
-    cats = await get_all_categories()
-    if cat_index >= len(cats):
-        return {"text": "Categoria non valida, rimanda il comando."}
-    cat = cats[cat_index]
-    payload["cat_id"] = cat["id"]
-    await save_pending("add_tx", payload)
-    return {
-        "text": (f"➕ Vuoi aggiungere:\n"
-                 f"• *{payload['merchant']}* -€{float(payload['amount']):.2f}\n"
-                 f"• Data: {payload.get('date', 'oggi')}\n"
-                 f"• Categoria: *{cat['name']}*\n\n"
-                 f"Rispondi *sì* per confermare o *no* per annullare.")
-    }
 
 
 async def handle_reminder(user_text: str) -> str:
