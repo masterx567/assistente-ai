@@ -1,7 +1,7 @@
 import os
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -172,67 +172,6 @@ def oauth_callback():
         f"<p><b>Full URL:</b> <code>{full_url}</code></p>",
         200,
     )
-
-
-@app.route("/api/eb-aspsps")
-def eb_aspsps():
-    """Debug temporaneo: trova l'ASPSP id di Isybank su Enable Banking."""
-    _require_cron_secret()
-    from agents.enable_banking import EB_API, _eb_headers
-    import httpx as _httpx
-    with _httpx.Client(timeout=15) as c:
-        r = c.get(f"{EB_API}/aspsps", headers=_eb_headers())
-    if r.status_code != 200:
-        return jsonify({"status": r.status_code, "body": r.text[:1000]})
-    aspsps = r.json().get("aspsps", [])
-    matches = [a for a in aspsps if "isybank" in a.get("name", "").lower() or "isy" in a.get("name", "").lower()]
-    return jsonify({"count": len(aspsps), "matches": matches})
-
-
-@app.route("/api/eb-auth-start")
-def eb_auth_start():
-    """Debug temporaneo: avvia nuova autorizzazione Enable Banking per Isybank."""
-    _require_cron_secret()
-    from agents.enable_banking import EB_API, _eb_headers
-    import httpx as _httpx
-    import time
-    body = {
-        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=179)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
-        "aspsp": {"name": "Isybank", "country": "IT"},
-        "state": f"retest-{int(time.time())}",
-        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
-        "psu_type": "personal",
-    }
-    with _httpx.Client(timeout=15) as c:
-        r = c.post(f"{EB_API}/auth", headers=_eb_headers(), json=body)
-    return jsonify({"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:1000]})
-
-
-@app.route("/api/eb-auth-finish")
-def eb_auth_finish():
-    """Debug temporaneo: scambia il code, testa subito il saldo sul nuovo account_uid.
-    Non espone mai session_id/account_uid/token nella risposta, solo esito e saldo."""
-    _require_cron_secret()
-    from agents.enable_banking import EB_API, EB_ACCOUNT_UID, _eb_headers
-    import httpx as _httpx
-    code = request.args.get("code", "")
-    if not code:
-        return jsonify({"ok": False, "error": "missing code param"})
-    with _httpx.Client(timeout=15) as c:
-        r = c.post(f"{EB_API}/sessions", headers=_eb_headers(), json={"code": code})
-    if r.status_code != 200:
-        return jsonify({"ok": False, "step": "exchange", "status": r.status_code})
-    accounts = r.json().get("accounts", [])
-    if not accounts:
-        return jsonify({"ok": False, "step": "exchange", "error": "no accounts in session"})
-    new_uid = accounts[0]
-    with _httpx.Client(timeout=15) as c:
-        r2 = c.get(f"{EB_API}/accounts/{new_uid}/balances", headers=_eb_headers())
-    if r2.status_code != 200:
-        return jsonify({"ok": False, "step": "balance", "status": r2.status_code, "error": (r2.json() if r2.headers.get("content-type","").startswith("application/json") else r2.text[:300])})
-    balances = r2.json().get("balances", [])
-    amounts = [b.get("balance_amount", {}).get("amount") for b in balances]
-    return jsonify({"ok": True, "fresh_consent_worked": True, "balances_found": amounts, "uid_matches_current_env": new_uid == EB_ACCOUNT_UID})
 
 
 @app.route("/api/webhook", methods=["POST"])
