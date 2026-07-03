@@ -149,10 +149,10 @@ async def get_morning_briefing() -> str:
         count = 0
         section_lines = []
         for a in articles:
-            if a["title"] in seen or count >= 2:
+            if a["title"] in seen or count >= 1:
                 continue
             seen.add(a["title"])
-            section_lines.append(f"  • {a['title']}")
+            section_lines.append(f"  • [{a['title']}]({a['url']})")
             count += 1
         if section_lines:
             lines.append(f"\n{label}")

@@ -412,31 +412,36 @@ def tick():
             mese = mese_anno_it(now)
             parts.append(f"🗓️ *Nuovo mese!* Benvenuto in {mese} — budget resettato a zero. Buona fortuna! 💪")
 
+        reminder_lines = []
+
         sub_msgs = asyncio.run(check_subscription_reminders())
-        parts.extend(sub_msgs)
+        reminder_lines.extend(sub_msgs)
         if sub_msgs:
             done.append(f"sub_reminders:{len(sub_msgs)}")
 
         bnpl_msgs = asyncio.run(check_commitment_reminders())
-        parts.extend(bnpl_msgs)
+        reminder_lines.extend(bnpl_msgs)
         if bnpl_msgs:
             done.append(f"bnpl_reminders:{len(bnpl_msgs)}")
 
         loan_msgs = asyncio.run(check_loan_reminders())
-        parts.extend(loan_msgs)
+        reminder_lines.extend(loan_msgs)
         if loan_msgs:
             done.append(f"loan_reminders:{len(loan_msgs)}")
 
         days_left = session_expiry_days()
         if 0 <= days_left <= 5:
-            parts.append(
+            reminder_lines.append(
                 f"⚠️ *Enable Banking* scade tra {days_left} giorni ({days_left + 1}/09).\n"
                 f"Rinnova l'autorizzazione Isybank per non perdere il sync automatico."
             )
             done.append("eb_expiry_reminder")
 
+        if reminder_lines:
+            parts.append("🔔 *PROMEMORIA*\n\n" + "\n\n".join(reminder_lines))
+
         days = asyncio.run(get_streak_days())
-        parts.append(format_streak_message(days))
+        parts.append("🎯 *STREAK*\n\n" + format_streak_message(days))
 
         send_telegram("\n\n━━━━━━━━━━━━━━━\n\n".join(parts))
         done.append("morning9")
