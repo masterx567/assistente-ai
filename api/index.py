@@ -197,7 +197,7 @@ def eb_auth_start():
     import httpx as _httpx
     import time
     body = {
-        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=180)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
+        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=179)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
         "aspsp": {"name": "Isybank", "country": "IT"},
         "state": f"retest-{int(time.time())}",
         "redirect_url": "https://assistente-ai-three.vercel.app/callback",
