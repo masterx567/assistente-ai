@@ -1,7 +1,7 @@
 import os
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -187,6 +187,25 @@ def eb_aspsps():
     aspsps = r.json().get("aspsps", [])
     matches = [a for a in aspsps if "isybank" in a.get("name", "").lower() or "isy" in a.get("name", "").lower()]
     return jsonify({"count": len(aspsps), "matches": matches})
+
+
+@app.route("/api/eb-auth-start")
+def eb_auth_start():
+    """Debug temporaneo: avvia nuova autorizzazione Enable Banking per Isybank."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, _eb_headers
+    import httpx as _httpx
+    import time
+    body = {
+        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=180)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
+        "aspsp": {"name": "Isybank", "country": "IT"},
+        "state": f"retest-{int(time.time())}",
+        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
+        "psu_type": "personal",
+    }
+    with _httpx.Client(timeout=15) as c:
+        r = c.post(f"{EB_API}/auth", headers=_eb_headers(), json=body)
+    return jsonify({"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text[:1000]})
 
 
 @app.route("/api/webhook", methods=["POST"])
