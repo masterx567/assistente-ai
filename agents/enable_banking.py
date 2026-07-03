@@ -342,12 +342,18 @@ async def _fetch_transactions(days_back: int = 3) -> list[dict]:
 # ── Main sync ─────────────────────────────────────────────────────────────────
 
 async def sync_transactions(days_back: int = 3) -> dict:
-    """Full pipeline: saldo conto + fetch → dedup → categorize → save. Returns stats."""
+    """Full pipeline: saldo conto (1x/giorno, quota ASPSP limitata) + fetch → dedup → categorize → save."""
     from agents.budget import save_account_balance
+    from agents.pending import already_ticked, mark_ticked
+    from datetime import date as _date
 
-    balance = await _fetch_balance()
-    if balance is not None:
-        await save_account_balance("Isybank", balance, "bank")
+    balance = None
+    balance_key = f"eb_balance:{_date.today()}"
+    if not await already_ticked(balance_key):
+        balance = await _fetch_balance()
+        if balance is not None:
+            await save_account_balance("Isybank", balance, "bank")
+            await mark_ticked(balance_key)
 
     txs = await _fetch_transactions(days_back)
     if not txs:
