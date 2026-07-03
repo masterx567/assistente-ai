@@ -783,6 +783,13 @@ async def get_spending_anomalies(months_back: int = 3) -> list[str]:
     return anomalies
 
 
+def _strip_md(text: str) -> str:
+    """Rimuove caratteri markdown (*, _) da testo dinamico (nomi merchant) prima di
+    wrapparlo in *grassetto* — un '*' letterale nel nome (es. 'KLARNA*TICKETONE')
+    spacca il parsing Markdown di Telegram e manda l'intero messaggio in plain text."""
+    return text.replace("*", "").replace("_", "")
+
+
 async def get_amortization_table() -> str:
     """Tabella piani BNPL attivi: totale, rimanente, rate rimaste, prossima scadenza."""
     body = {
@@ -803,6 +810,7 @@ async def get_amortization_table() -> str:
         name_parts = props.get("Name", {}).get("title", [])
         name = name_parts[0]["plain_text"] if name_parts else "?"
         name = re.sub(r"\s*\(€[\d.,]+\)\s*$", "", name).strip()
+        name = _strip_md(name)
         total = props.get("amount_total", {}).get("number") or 0
         remaining = props.get("amount_remaining", {}).get("number") or 0
         installment = props.get("monthly_installment", {}).get("number") or 0
@@ -846,6 +854,7 @@ async def check_commitment_reminders() -> list[str]:
         props = c["properties"]
         name_parts = props.get("Name", {}).get("title", [])
         name = name_parts[0]["plain_text"] if name_parts else "?"
+        name = _strip_md(name)
         installment = props.get("monthly_installment", {}).get("number") or 0
         remaining = props.get("amount_remaining", {}).get("number") or 0
         due_iso = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]

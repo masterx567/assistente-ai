@@ -405,10 +405,8 @@ def tick():
     # Blocco unico 09:00: streak + nuovo mese + reminder abbonamenti/BNPL/prestiti +
     # scadenza Enable Banking + briefing mattutino — un solo messaggio Telegram
     if h == 9 and m == 0 and _once(f"morning9:{now.date()}"):
-        parts = []
-
-        days = asyncio.run(get_streak_days())
-        parts.append(format_streak_message(days))
+        briefing = asyncio.run(get_morning_briefing())
+        parts = [briefing]
 
         if now.day == 1:
             mese = mese_anno_it(now)
@@ -437,8 +435,8 @@ def tick():
             )
             done.append("eb_expiry_reminder")
 
-        briefing = asyncio.run(get_morning_briefing())
-        parts.append(briefing)
+        days = asyncio.run(get_streak_days())
+        parts.append(format_streak_message(days))
 
         send_telegram("\n\n━━━━━━━━━━━━━━━\n\n".join(parts))
         done.append("morning9")

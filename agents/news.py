@@ -152,7 +152,7 @@ async def get_morning_briefing() -> str:
             if a["title"] in seen or count >= 2:
                 continue
             seen.add(a["title"])
-            section_lines.append(f"  • [{a['title']}]({a['url']})")
+            section_lines.append(f"  • {a['title']}")
             count += 1
         if section_lines:
             lines.append(f"\n{label}")
