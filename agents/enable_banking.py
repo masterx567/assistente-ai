@@ -350,10 +350,10 @@ async def sync_transactions(days_back: int = 3) -> dict:
     balance = None
     balance_key = f"eb_balance:{_date.today()}"
     if not await already_ticked(balance_key):
+        await mark_ticked(balance_key)  # segna il tentativo subito: anche se fallisce, non ritentare oggi
         balance = await _fetch_balance()
         if balance is not None:
             await save_account_balance("Isybank", balance, "bank")
-            await mark_ticked(balance_key)
 
     txs = await _fetch_transactions(days_back)
     if not txs:
