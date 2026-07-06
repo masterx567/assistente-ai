@@ -223,13 +223,17 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
         return await get_month_projection()
 
-    # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione
+    # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione.
+    # "sarò/andrò/vado in <viaggio/vacanza/luogo>" + una data nel testo (altrimenti "sarò in ufficio" farebbe match)
     trip_start_kw = [
         "sarò in viaggio", "andrò in viaggio", "vado in viaggio", "sto per partire",
         "sarò in vacanza", "andrò in vacanza", "vado in vacanza",
         "parto per", "viaggio dal", "vacanza dal",
     ]
-    if any(w in text_lower for w in trip_start_kw):
+    _trip_verb = _re.search(r"\b(sarò|andrò|vado|partirò)\s+(in|a|per)\s+\w+", text_lower)
+    _trip_date = _re.search(r"\bdal\s+\d{1,2}\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|"
+                             r"\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b", text_lower)
+    if any(w in text_lower for w in trip_start_kw) or (_trip_verb and _trip_date):
         return await handle_new_trip_start(user_text)
 
     # Budget viaggio rimanente
