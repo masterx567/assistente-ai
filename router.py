@@ -10,7 +10,7 @@ from agents.calendar import get_events, get_events_in_range, format_events, add_
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
-from agents.studio import mark_course_done, get_next_course, format_next_course_line
+from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -195,6 +195,11 @@ async def route_message(user_text: str) -> str:
     # Patrimonio netto
     if any(w in text_lower for w in ["patrimonio", "quanto vale il mio patrimonio", "net worth"]):
         return await get_net_worth()
+
+    # Piano di studio completo
+    if any(w in text_lower for w in ["piano esami", "piano studio", "piano di studio", "piano corsi", "i miei esami", "prossimi esami"]):
+        courses = await get_full_plan()
+        return format_study_plan(courses)
 
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):

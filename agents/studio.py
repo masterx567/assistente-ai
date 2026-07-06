@@ -50,3 +50,35 @@ def is_overdue(course: dict) -> bool:
     if not course.get("fine"):
         return False
     return date.today() >= date.fromisoformat(course["fine"])
+
+
+async def get_full_plan() -> list[dict]:
+    """Tutti i corsi ordinati per 'ordine', con stato e data prevista."""
+    body = {
+        "sorts": [{"property": "ordine", "direction": "ascending"}],
+        "page_size": 100,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_STUDIO}/query", headers=HEADERS, json=body)
+    courses = []
+    for page in r.json().get("results", []):
+        props = page["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = name_parts[0]["plain_text"] if name_parts else "?"
+        fine_iso = (props.get("fine", {}).get("date") or {}).get("start", "")[:10]
+        stato = (props.get("stato", {}).get("select") or {}).get("name", "da_fare")
+        courses.append({"corso": name, "fine": fine_iso, "stato": stato})
+    return courses
+
+
+def format_study_plan(courses: list[dict]) -> str:
+    if not courses:
+        return "Nessun corso nel piano di studio."
+    lines = ["🎓 *Piano di studio*\n"]
+    for c in courses:
+        emoji = "✅" if c["stato"] == "completato" else "📖"
+        fine = date.fromisoformat(c["fine"]).strftime("%d/%m/%Y") if c["fine"] else "n/d"
+        lines.append(f"{emoji} {c['corso']} — {fine}")
+    done = sum(1 for c in courses if c["stato"] == "completato")
+    lines.append(f"\n*{done}/{len(courses)} completati*")
+    return "\n".join(lines)
