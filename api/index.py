@@ -229,7 +229,7 @@ def tick():
 
     # Blocco unico 09:00: streak + nuovo mese + reminder abbonamenti/BNPL/prestiti +
     # scadenza Enable Banking + briefing mattutino — un solo messaggio Telegram
-    if h == 9 and m == 0 and _once(f"morning9:{now.date()}"):
+    if h == 9 and m <= 4 and _once(f"morning9:{now.date()}"):
         briefing = asyncio.run(get_morning_briefing())
         parts = [briefing]
 
@@ -272,20 +272,20 @@ def tick():
         done.append("morning9")
 
     # Incoraggiamento streak dipendenza: 14:00 / 21:00 (09:00 incluso nel blocco sopra)
-    if (h in (14, 21)) and m == 0 and _once(f"streak:{now.date()}:{h}"):
+    if (h in (14, 21)) and m <= 4 and _once(f"streak:{now.date()}:{h}"):
         days = asyncio.run(get_streak_days())
         send_telegram(format_streak_message(days))
         done.append(f"streak:{days}")
 
     # Budget serale: 20:00 esatto
-    if h == 20 and m == 0 and _once(f"evening:{now.date()}"):
+    if h == 20 and m <= 4 and _once(f"evening:{now.date()}"):
         alerts = asyncio.run(get_budget_alerts())
         if alerts:
             send_telegram(format_alerts(alerts))
         done.append("evening")
 
     # Riepilogo settimanale: domenica 20:00
-    if now.weekday() == 6 and h == 20 and m == 0 and _once(f"weekly:{now.date()}"):
+    if now.weekday() == 6 and h == 20 and m <= 4 and _once(f"weekly:{now.date()}"):
         weekly = asyncio.run(get_weekly_spending())
         msg = format_weekly_summary(weekly)
         digest = asyncio.run(get_food_digest(days_back=7))
@@ -301,7 +301,7 @@ def tick():
     # Riepilogo mensile: ultimo giorno del mese alle 20:00
     import calendar as cal_mod
     last_day = cal_mod.monthrange(now.year, now.month)[1]
-    if now.day == last_day and h == 20 and m == 0 and _once(f"monthly:{now.date()}"):
+    if now.day == last_day and h == 20 and m <= 4 and _once(f"monthly:{now.date()}"):
         monthly = asyncio.run(get_monthly_spending())
         alerts = asyncio.run(get_budget_alerts())
         msg = f"📅 *Riepilogo {mese_anno_it(now)}*\n\n" + format_spending_summary(monthly)
@@ -313,7 +313,7 @@ def tick():
         done.append("monthly")
 
     # Sync banca Enable Banking: ogni 2h esatte (00, 02, 04...)
-    if h % 2 == 0 and m == 0:
+    if h % 2 == 0 and m <= 4:
         result = asyncio.run(sync_transactions(days_back=3))
         done.append(f"bank_sync:{result.get('saved', 0)}saved")
 
@@ -341,20 +341,20 @@ def _check_reminders(now: datetime) -> list[str]:
         minutes_until = (start - now).total_seconds() / 60
 
         tomorrow = (now + timedelta(days=1)).date()
-        # Giorno prima: 20:00 esatto
-        if start.date() == tomorrow and h == 20 and m == 0 and asyncio.run(already_ticked(f"day_before:{title}:{now.date()}")) is False:
+        # Giorno prima: 20:00-20:04
+        if start.date() == tomorrow and h == 20 and m <= 4 and asyncio.run(already_ticked(f"day_before:{title}:{now.date()}")) is False:
             asyncio.run(mark_ticked(f"day_before:{title}:{now.date()}"))
             send_telegram(f"📅 Domani alle *{start.strftime('%H:%M')}*: *{title}*")
             sent.append(f"day_before:{title}")
 
-        # 2 ore prima: finestra 2 min (119-121)
-        elif 119 <= minutes_until <= 121 and asyncio.run(already_ticked(f"2h:{title}:{start.isoformat()}")) is False:
+        # 2 ore prima: finestra 10 min (115-124), copre eventuali salti del cron
+        elif 115 <= minutes_until <= 124 and asyncio.run(already_ticked(f"2h:{title}:{start.isoformat()}")) is False:
             asyncio.run(mark_ticked(f"2h:{title}:{start.isoformat()}"))
             send_telegram(f"⏰ Tra 2 ore: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"2h:{title}")
 
-        # 1 ora prima: finestra 2 min (59-61)
-        elif 59 <= minutes_until <= 61 and asyncio.run(already_ticked(f"1h:{title}:{start.isoformat()}")) is False:
+        # 1 ora prima: finestra 10 min (55-64)
+        elif 55 <= minutes_until <= 64 and asyncio.run(already_ticked(f"1h:{title}:{start.isoformat()}")) is False:
             asyncio.run(mark_ticked(f"1h:{title}:{start.isoformat()}"))
             send_telegram(f"⏰ Tra 1 ora: *{title}* alle {start.strftime('%H:%M')}")
             sent.append(f"1h:{title}")

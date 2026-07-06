@@ -740,6 +740,7 @@ async def check_commitment_reminders() -> list[str]:
     body = {
         "filter": {"and": [
             {"property": "next_due", "date": {"on_or_before": limit}},
+            {"property": "next_due", "date": {"on_or_after": today.isoformat()}},
             {"property": "amount_remaining", "number": {"greater_than": 0}},
         ]},
         "page_size": 20,
