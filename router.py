@@ -240,12 +240,16 @@ async def route_message(user_text: str) -> str:
         return await handle_new_trip_start(user_text)
 
     # Budget viaggio rimanente
-    if any(w in text_lower for w in ["budget viaggio", "quanto budget viaggio", "quanto mi resta per il viaggio", "quanto ho speso in viaggio"]):
+    _budget_trip_kw = any(w in text_lower for w in ["budget viaggio", "quanto budget viaggio", "quanto mi resta per il viaggio", "quanto ho speso in viaggio"])
+    if _budget_trip_kw or ("budget" in text_lower):
         trip = await get_active_trip()
-        if not trip:
+        # "budget <qualcosa>" senza "viaggio": mostra il viaggio solo se la destinazione
+        # è nominata nel testo (es. "budget polonia"), altrimenti lascia il budget generico
+        if trip and (_budget_trip_kw or trip["destinazione"].lower() in text_lower):
+            spent = await get_trip_spending(trip)
+            return format_trip_budget(trip, spent)
+        if _budget_trip_kw:
             return "Nessun viaggio salvato al momento."
-        spent = await get_trip_spending(trip)
-        return format_trip_budget(trip, spent)
 
     # Aggiungi voce alla checklist (controlla PRIMA di "mostra checklist", altrimenti ci finisce dentro)
     add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+alla checklist", text_lower)
