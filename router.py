@@ -106,6 +106,18 @@ async def route_message(user_text: str) -> str:
             "markup": checklist_buttons(checklist),
         }
 
+    # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione.
+    # Basta la parola "viaggio"/"vacanza" + una data ovunque nel testo — controllato PRIMA di
+    # qualsiasi comando calendario, perché "evento"/mesi/date ci finiscono facilmente dentro
+    # (es. "crea evento viaggio Bruxelles dal 1 al 3 settembre" contiene "evento" e "settembre").
+    _trip_word = any(w in text_lower for w in ["viaggio", "vacanza"])
+    _trip_verb = _re.search(r"\b(sarò|andrò|vado|partirò)\s+(in|a|per)\s+\w+", text_lower)
+    _trip_date = _re.search(r"\bdal\s+\d{1,2}\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|"
+                             r"\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b", text_lower)
+    _trip_delete = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio", text_lower)
+    if (_trip_word or _trip_verb) and _trip_date and not _trip_delete:
+        return await handle_new_trip_start(user_text)
+
     # Conferma/annulla azione pending
     _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
     _cancel_kw  = {"no", "annulla", "stop", "abort", "lascia perdere", "lasciare perdere", "non fare", "non voglio"}
@@ -225,19 +237,6 @@ async def route_message(user_text: str) -> str:
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
         return await get_month_projection()
-
-    # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione.
-    # "sarò/andrò/vado in <viaggio/vacanza/luogo>" + una data nel testo (altrimenti "sarò in ufficio" farebbe match)
-    trip_start_kw = [
-        "sarò in viaggio", "andrò in viaggio", "vado in viaggio", "sto per partire",
-        "sarò in vacanza", "andrò in vacanza", "vado in vacanza",
-        "parto per", "viaggio dal", "vacanza dal",
-    ]
-    _trip_verb = _re.search(r"\b(sarò|andrò|vado|partirò)\s+(in|a|per)\s+\w+", text_lower)
-    _trip_date = _re.search(r"\bdal\s+\d{1,2}\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|"
-                             r"\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b", text_lower)
-    if any(w in text_lower for w in trip_start_kw) or (_trip_verb and _trip_date):
-        return await handle_new_trip_start(user_text)
 
     # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
     _del_trip_match = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio\s*(.*)", text_lower)
