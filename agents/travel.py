@@ -123,13 +123,37 @@ async def get_checklist(trip_id: str) -> list[dict]:
 def format_checklist(items: list[dict]) -> str:
     if not items:
         return "Nessuna checklist per questo viaggio."
-    lines = ["🧳 *Checklist*\n"]
+    done = sum(1 for i in items if i["fatto"])
+    return f"🧳 *Checklist* ({done}/{len(items)}) — tocca una voce per spuntarla:"
+
+
+def checklist_buttons(items: list[dict]) -> dict:
+    """Tastiera inline, una voce per riga, callback_data = 'cl:{item_id}'."""
+    rows = []
     for i in items:
         emoji = "✅" if i["fatto"] else "⬜"
-        lines.append(f"{emoji} {i['testo']}")
-    done = sum(1 for i in items if i["fatto"])
-    lines.append(f"\n*{done}/{len(items)}*")
-    return "\n".join(lines)
+        rows.append([{"text": f"{emoji} {i['testo']}", "callback_data": f"cl:{i['id']}"}])
+    return {"inline_keyboard": rows}
+
+
+async def toggle_checklist_item(item_id: str) -> bool:
+    """Inverte lo stato fatto/non-fatto di una voce. Ritorna il nuovo stato."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"https://api.notion.com/v1/pages/{item_id}", headers=HEADERS)
+        current = r.json()["properties"].get("fatto", {}).get("checkbox", False)
+        new_state = not current
+        await client.patch(f"https://api.notion.com/v1/pages/{item_id}", headers=HEADERS, json={
+            "properties": {"fatto": {"checkbox": new_state}}
+        })
+    return new_state
+
+
+async def get_checklist_by_trip_of_item(item_id: str) -> str | None:
+    """Ritorna il trip_id a cui appartiene una voce checklist (per rigenerare la tastiera dopo il tap)."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"https://api.notion.com/v1/pages/{item_id}", headers=HEADERS)
+    rel = r.json()["properties"].get("viaggio", {}).get("relation", [])
+    return rel[0]["id"] if rel else None
 
 
 async def mark_checklist_item(trip_id: str, query: str) -> str | None:

@@ -12,7 +12,7 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from router import route_message
+from router import route_message, handle_checklist_toggle
 from agents.errors import log_error
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
@@ -108,6 +108,27 @@ def transcribe_voice(file_id: str, filename: str = "voice.ogg") -> str | None:
     return r2.json().get("text", "").strip() or None
 
 
+def answer_callback(callback_query_id: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
+    with httpx.Client(timeout=5) as c:
+        c.post(url, json={"callback_query_id": callback_query_id})
+
+
+def edit_telegram_message(message_id: int, text: str, reply_markup: dict = None):
+    """Modifica un messaggio esistente (usato per i bottoni checklist, evita spam di nuovi messaggi)."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageText"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id, "text": text, "parse_mode": "Markdown"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    with httpx.Client(timeout=9) as c:
+        r = c.post(url, json=payload)
+        if not r.json().get("ok"):
+            plain = {"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id, "text": text}
+            if reply_markup:
+                plain["reply_markup"] = reply_markup
+            c.post(url, json=plain)
+
+
 def get_access_token() -> str | None:
     if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN]):
         return None
@@ -180,6 +201,23 @@ def webhook():
         if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
             return jsonify({"ok": False}), 403
     data = request.get_json(silent=True) or {}
+
+    # Gestione callback_query (tap su bottone inline, es. checklist viaggio)
+    callback = data.get("callback_query")
+    if callback:
+        cb_chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
+        cb_message_id = callback.get("message", {}).get("message_id")
+        cb_data = callback.get("data", "")
+        cb_id = callback.get("id", "")
+        answer_callback(cb_id)
+        if cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("cl:"):
+            item_id = cb_data[3:]
+            try:
+                result = asyncio.run(handle_checklist_toggle(item_id))
+            except Exception as e:
+                result = {"text": f"Errore: {str(e)}"}
+            edit_telegram_message(cb_message_id, result["text"], result.get("markup"))
+        return jsonify({"ok": True})
 
     # Gestione messaggio normale
     message = data.get("message", {})

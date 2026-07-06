@@ -11,7 +11,7 @@ from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
-from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, mark_checklist_item, add_checklist_item
+from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -100,8 +100,11 @@ async def route_message(user_text: str) -> str:
         checklist = await get_checklist(trip_id)
         start_fmt = datetime.fromisoformat(payload["start"]).strftime("%d/%m")
         end_fmt = datetime.fromisoformat(payload["end"]).strftime("%d/%m")
-        return (f"✅ Viaggio a *{payload['destinazione']}* salvato ({start_fmt}–{end_fmt}, budget €{amount:.0f}).\n\n"
-                + format_checklist(checklist))
+        return {
+            "text": (f"✅ Viaggio a *{payload['destinazione']}* salvato ({start_fmt}–{end_fmt}, budget €{amount:.0f}).\n\n"
+                     + format_checklist(checklist)),
+            "markup": checklist_buttons(checklist),
+        }
 
     # Conferma/annulla azione pending
     _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
@@ -260,7 +263,7 @@ async def route_message(user_text: str) -> str:
         if not trip:
             return "Nessun viaggio salvato al momento."
         items = await get_checklist(trip["id"])
-        return format_checklist(items)
+        return {"text": format_checklist(items), "markup": checklist_buttons(items)}
 
     # Segna voce checklist come fatta: "fatto <voce>" (con testo dopo, non il "fatto" secco di conferma)
     fatto_match = _re.match(r"^fatto\s+(.+)", text_lower)
@@ -517,6 +520,16 @@ async def handle_cancel() -> dict:
         return {"text": "Ok, resta da fare — te lo richiedo domani."}
     await clear_pending(pending["id"])
     return {"text": "❌ Annullato."}
+
+
+async def handle_checklist_toggle(item_id: str) -> dict:
+    """Callback tap su voce checklist: inverte lo stato e rimanda la tastiera aggiornata."""
+    await toggle_checklist_item(item_id)
+    trip_id = await get_checklist_by_trip_of_item(item_id)
+    if not trip_id:
+        return {"text": "Voce non trovata."}
+    items = await get_checklist(trip_id)
+    return {"text": format_checklist(items), "markup": checklist_buttons(items)}
 
 
 async def handle_reminder(user_text: str) -> str:
