@@ -103,6 +103,47 @@ def format_trip_budget(trip: dict, spent: float) -> str:
     )
 
 
+async def get_trip_transactions(trip: dict) -> list[dict]:
+    """Transazioni sincronizzate (source=api) nel periodo del viaggio, con id per poterle eliminare."""
+    from agents.enable_banking import DB_TRANSACTIONS, NOTION_HEADERS
+    body = {
+        "filter": {"and": [
+            {"property": "source", "select": {"equals": "api"}},
+            {"property": "date", "date": {"on_or_after": trip["start"]}},
+            {"property": "date", "date": {"on_or_before": trip["end"]}},
+            {"property": "amount", "number": {"less_than": 0}},
+        ]},
+        "sorts": [{"property": "date", "direction": "descending"}],
+        "page_size": 50,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=NOTION_HEADERS, json=body)
+    results = []
+    for page in r.json().get("results", []):
+        props = page["properties"]
+        amount = abs(props.get("amount", {}).get("number") or 0)
+        merchant_parts = props.get("merchant_raw", {}).get("rich_text", [])
+        merchant = merchant_parts[0]["plain_text"] if merchant_parts else "?"
+        date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+        results.append({"id": page["id"], "merchant": merchant, "amount": amount, "date": date_str})
+    return results
+
+
+def trip_transactions_buttons(transactions: list[dict]) -> dict:
+    """Tastiera inline: una transazione per riga, tap = elimina. callback_data = 'td:{tx_id}'."""
+    rows = []
+    for t in transactions:
+        d = date.fromisoformat(t["date"]).strftime("%d/%m") if t["date"] else "?"
+        rows.append([{"text": f"🗑️ {d} {t['merchant']} -€{t['amount']:.2f}", "callback_data": f"td:{t['id']}"}])
+    return {"inline_keyboard": rows}
+
+
+async def delete_trip_transaction(tx_id: str) -> None:
+    from agents.enable_banking import NOTION_HEADERS
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.patch(f"https://api.notion.com/v1/pages/{tx_id}", headers=NOTION_HEADERS, json={"archived": True})
+
+
 async def get_checklist(trip_id: str) -> list[dict]:
     body = {
         "filter": {"property": "viaggio", "relation": {"contains": trip_id}},

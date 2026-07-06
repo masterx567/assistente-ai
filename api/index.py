@@ -12,7 +12,7 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from router import route_message, handle_checklist_toggle
+from router import route_message, handle_checklist_toggle, handle_trip_transaction_delete
 from agents.errors import log_error
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
@@ -214,6 +214,13 @@ def webhook():
             item_id = cb_data[3:]
             try:
                 result = asyncio.run(handle_checklist_toggle(item_id))
+            except Exception as e:
+                result = {"text": f"Errore: {str(e)}"}
+            edit_telegram_message(cb_message_id, result["text"], result.get("markup"))
+        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("td:"):
+            tx_id = cb_data[3:]
+            try:
+                result = asyncio.run(handle_trip_transaction_delete(tx_id))
             except Exception as e:
                 result = {"text": f"Errore: {str(e)}"}
             edit_telegram_message(cb_message_id, result["text"], result.get("markup"))

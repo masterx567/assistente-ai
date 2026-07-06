@@ -11,7 +11,7 @@ from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
-from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item
+from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -247,7 +247,12 @@ async def route_message(user_text: str) -> str:
         # è nominata nel testo (es. "budget polonia"), altrimenti lascia il budget generico
         if trip and (_budget_trip_kw or trip["destinazione"].lower() in text_lower):
             spent = await get_trip_spending(trip)
-            return format_trip_budget(trip, spent)
+            text = format_trip_budget(trip, spent)
+            transactions = await get_trip_transactions(trip)
+            if transactions:
+                text += "\n\nTocca una transazione per eliminarla (se non è del viaggio):"
+                return {"text": text, "markup": trip_transactions_buttons(transactions)}
+            return text
         if _budget_trip_kw:
             return "Nessun viaggio salvato al momento."
 
@@ -534,6 +539,21 @@ async def handle_checklist_toggle(item_id: str) -> dict:
         return {"text": "Voce non trovata."}
     items = await get_checklist(trip_id)
     return {"text": format_checklist(items), "markup": checklist_buttons(items)}
+
+
+async def handle_trip_transaction_delete(tx_id: str) -> dict:
+    """Callback tap su transazione viaggio: elimina e rimanda la lista aggiornata."""
+    await delete_trip_transaction(tx_id)
+    trip = await get_active_trip()
+    if not trip:
+        return {"text": "✅ Eliminata.", "markup": {"inline_keyboard": []}}
+    spent = await get_trip_spending(trip)
+    text = "✅ Transazione eliminata.\n\n" + format_trip_budget(trip, spent)
+    transactions = await get_trip_transactions(trip)
+    if transactions:
+        text += "\n\nTocca una transazione per eliminarla (se non è del viaggio):"
+        return {"text": text, "markup": trip_transactions_buttons(transactions)}
+    return {"text": text, "markup": {"inline_keyboard": []}}
 
 
 async def handle_reminder(user_text: str) -> str:
