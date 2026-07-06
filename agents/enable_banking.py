@@ -9,6 +9,13 @@ DB_CATEGORIES = os.getenv("NOTION_DB_CATEGORIES")
 DB_MERCHANTMAP = "c82a1f2a-a1dc-421b-aeb8-e0fc4e413354"
 DB_COMMITMENTS = "609fd00a-fe13-4900-bb2d-f460b134ea4e"
 
+# Ancora fissa per il saldo Isybank: valore confermato manualmente dall'utente
+# contro l'app della banca. Il saldo corrente si ricalcola sempre come
+# ANCHOR_BALANCE + somma transazioni sincronizzate (source=api) dopo questa data —
+# mai chiamando l'endpoint /balances (rate-limited su Isybank, 429 il 03/07/2026).
+ISYBANK_ANCHOR_DATE = "2026-07-06"
+ISYBANK_ANCHOR_BALANCE = 3019.36
+
 _BNPL_KEYWORDS = ("KLARNA", "SCALAPAY", "PAGA IN 3 RATE", "PAYPAL *PAGA")
 _RE_RATE_COUNT = re.compile(r'IN\s+(\d+)\s+RATE', re.I)
 
@@ -287,32 +294,27 @@ async def _upsert_bnpl_commitment(merchant: str, amount: float, booking_date: st
 
 # ── Enable Banking fetch ──────────────────────────────────────────────────────
 
-_BALANCE_TYPE_PRIORITY = ("interimAvailable", "expected", "closingBooked", "openingBooked")
-
-
-async def _fetch_balance() -> float | None:
-    """Legge il saldo conto corrente da Enable Banking (standard Berlin Group/PSD2)."""
-    if not EB_SESSION_ID or not EB_PRIVATE_KEY:
-        return None
+async def _sum_synced_since(since_date: str) -> float:
+    """Somma le transazioni sincronizzate (source=api) con date > since_date.
+    Usata per aggiornare il saldo senza chiamare l'endpoint /balances (rate-limited)."""
+    body = {
+        "filter": {"and": [
+            {"property": "source", "select": {"equals": "api"}},
+            {"property": "date", "date": {"after": since_date}},
+        ]},
+        "page_size": 100,
+    }
+    total = 0.0
     async with httpx.AsyncClient(timeout=15) as c:
-        r = await c.get(f"{EB_API}/accounts/{EB_ACCOUNT_UID}/balances", headers=_eb_headers())
-    if r.status_code != 200:
-        return None
-    balances = r.json().get("balances", [])
-    if not balances:
-        return None
-    by_type = {b.get("balance_type"): b for b in balances}
-    for btype in _BALANCE_TYPE_PRIORITY:
-        b = by_type.get(btype)
-        if b:
-            try:
-                return float(b["balance_amount"]["amount"])
-            except (KeyError, ValueError, TypeError):
-                continue
-    try:
-        return float(balances[0]["balance_amount"]["amount"])
-    except (KeyError, ValueError, TypeError, IndexError):
-        return None
+        while True:
+            r = await c.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=NOTION_HEADERS, json=body)
+            data = r.json()
+            for page in data.get("results", []):
+                total += page["properties"].get("amount", {}).get("number") or 0
+            if not data.get("has_more"):
+                break
+            body["start_cursor"] = data["next_cursor"]
+    return total
 
 
 async def _fetch_transactions(days_back: int = 3) -> list[dict]:
@@ -342,58 +344,54 @@ async def _fetch_transactions(days_back: int = 3) -> list[dict]:
 # ── Main sync ─────────────────────────────────────────────────────────────────
 
 async def sync_transactions(days_back: int = 3) -> dict:
-    """Full pipeline: saldo conto (1x/giorno, quota ASPSP limitata) + fetch → dedup → categorize → save."""
+    """Full pipeline: fetch → dedup → categorize → save transazioni, poi ricalcola
+    il saldo Isybank sommando i movimenti sincronizzati dall'ancora fissa (niente
+    chiamate a /balances, che va in rate limit su Isybank)."""
     from agents.budget import save_account_balance
-    from agents.pending import already_ticked, mark_ticked
-    from datetime import date as _date
-
-    balance = None
-    balance_key = f"eb_balance:{_date.today()}"
-    if not await already_ticked(balance_key):
-        await mark_ticked(balance_key)  # segna il tentativo subito: anche se fallisce, non ritentare oggi
-        balance = await _fetch_balance()
-        if balance is not None:
-            await save_account_balance("Isybank", balance, "bank")
 
     txs = await _fetch_transactions(days_back)
     if not txs:
-        return {"fetched": 0, "saved": 0, "skipped": 0, "balance_synced": balance is not None,
-                "error": "No transactions or missing config"}
+        result = {"fetched": 0, "saved": 0, "skipped": 0, "error": "No transactions or missing config"}
+    else:
+        cats = await _get_categories()  # {name: page_id}
+        saved = skipped = 0
 
-    cats = await _get_categories()  # {name: page_id}
-    saved = skipped = 0
+        for tx in txs:
+            entry_ref = tx.get("entry_reference", "")
+            if entry_ref and await _tx_exists(entry_ref):
+                skipped += 1
+                continue
 
-    for tx in txs:
-        entry_ref = tx.get("entry_reference", "")
-        if entry_ref and await _tx_exists(entry_ref):
-            skipped += 1
-            continue
+            rem = tx.get("remittance_information") or [""]
+            merchant, forced_cat = _extract_merchant(rem[0])
 
-        rem = tx.get("remittance_information") or [""]
-        merchant, forced_cat = _extract_merchant(rem[0])
+            # BNPL: aggiorna piano ammortamento invece di categorizzare normalmente
+            if any(kw in merchant.upper() or kw in rem[0].upper() for kw in _BNPL_KEYWORDS):
+                amount = abs(float(tx["transaction_amount"]["amount"]))
+                await _upsert_bnpl_commitment(merchant, amount, tx["booking_date"], rem[0])
+                forced_cat = forced_cat or "Shopping"
 
-        # BNPL: aggiorna piano ammortamento invece di categorizzare normalmente
-        if any(kw in merchant.upper() or kw in rem[0].upper() for kw in _BNPL_KEYWORDS):
-            amount = abs(float(tx["transaction_amount"]["amount"]))
-            await _upsert_bnpl_commitment(merchant, amount, tx["booking_date"], rem[0])
-            forced_cat = forced_cat or "Shopping"
+            # Resolve category
+            category_id: str | None = None
+            if forced_cat:
+                category_id = cats.get(forced_cat)
+            else:
+                category_id = await _merchant_lookup(merchant)
+                if not category_id:
+                    cat_name = await _groq_categorize(merchant)
+                    category_id = cats.get(cat_name) or cats.get("Altro")
+                    if category_id:
+                        await _merchant_create(merchant, category_id)
 
-        # Resolve category
-        category_id: str | None = None
-        if forced_cat:
-            category_id = cats.get(forced_cat)
-        else:
-            category_id = await _merchant_lookup(merchant)
-            if not category_id:
-                cat_name = await _groq_categorize(merchant)
-                category_id = cats.get(cat_name) or cats.get("Altro")
-                if category_id:
-                    await _merchant_create(merchant, category_id)
+            await _tx_save(tx, merchant, category_id)
+            saved += 1
 
-        await _tx_save(tx, merchant, category_id)
-        saved += 1
+        result = {"fetched": len(txs), "saved": saved, "skipped": skipped}
 
-    return {"fetched": len(txs), "saved": saved, "skipped": skipped, "balance_synced": balance is not None}
+    delta = await _sum_synced_since(ISYBANK_ANCHOR_DATE)
+    await save_account_balance("Isybank", ISYBANK_ANCHOR_BALANCE + delta, "bank")
+    result["balance_synced"] = True
+    return result
 
 
 # ── OAuth reminder ────────────────────────────────────────────────────────────

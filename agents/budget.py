@@ -447,6 +447,20 @@ DB_COMMITMENTS = "609fd00a-fe13-4900-bb2d-f460b134ea4e"
 DB_ACCOUNTS = "13ed0283-e81f-4c95-8c04-57bdc4d15ff5"
 
 
+async def get_account_info(name: str) -> dict | None:
+    """Ritorna {balance, last_updated} per un conto (cerca by Name esatto)."""
+    body = {"filter": {"property": "Name", "title": {"equals": name}}, "page_size": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    if not results:
+        return None
+    props = results[0]["properties"]
+    balance = props.get("balance", {}).get("number") or 0
+    last_updated = (props.get("last_updated", {}).get("date") or {}).get("start", "")[:10]
+    return {"balance": balance, "last_updated": last_updated}
+
+
 async def save_account_balance(name: str, balance: float, acc_type: str) -> None:
     """Crea o aggiorna un conto in Accounts (cerca by Name esatto)."""
     body = {"filter": {"property": "Name", "title": {"equals": name}}, "page_size": 1}
