@@ -11,6 +11,7 @@ from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
+from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, mark_checklist_item, add_checklist_item
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -84,6 +85,23 @@ async def route_message(user_text: str) -> str:
             amount = float(_num_match.group().replace(",", "."))
             await save_account_balance("Fineco ETF", amount, "investment")
             return await get_net_worth()
+
+    # Nuovo viaggio: step 2 (destinazione, testo libero) e step 3 (budget, numero)
+    _trip_pending = await get_pending()
+    if _trip_pending and _trip_pending["action"] == "new_trip_dates":
+        await clear_pending(_trip_pending["id"])
+        await save_pending("new_trip_budget", {**_trip_pending["payload"], "destinazione": user_text.strip()})
+        return "Quanto budget hai in mente?"
+    if _trip_pending and _trip_pending["action"] == "new_trip_budget" and _num_match:
+        await clear_pending(_trip_pending["id"])
+        amount = float(_num_match.group().replace(",", "."))
+        payload = _trip_pending["payload"]
+        trip_id = await create_trip(payload["destinazione"], payload["start"], payload["end"], amount)
+        checklist = await get_checklist(trip_id)
+        start_fmt = datetime.fromisoformat(payload["start"]).strftime("%d/%m")
+        end_fmt = datetime.fromisoformat(payload["end"]).strftime("%d/%m")
+        return (f"✅ Viaggio a *{payload['destinazione']}* salvato ({start_fmt}–{end_fmt}, budget €{amount:.0f}).\n\n"
+                + format_checklist(checklist))
 
     # Conferma/annulla azione pending
     _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
@@ -204,6 +222,50 @@ async def route_message(user_text: str) -> str:
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
         return await get_month_projection()
+
+    # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione
+    trip_start_kw = [
+        "sarò in viaggio", "andrò in viaggio", "vado in viaggio", "sto per partire",
+        "sarò in vacanza", "andrò in vacanza", "vado in vacanza",
+        "parto per", "viaggio dal", "vacanza dal",
+    ]
+    if any(w in text_lower for w in trip_start_kw):
+        return await handle_new_trip_start(user_text)
+
+    # Budget viaggio rimanente
+    if any(w in text_lower for w in ["budget viaggio", "quanto budget viaggio", "quanto mi resta per il viaggio", "quanto ho speso in viaggio"]):
+        trip = await get_active_trip()
+        if not trip:
+            return "Nessun viaggio salvato al momento."
+        spent = await get_trip_spending(trip)
+        return format_trip_budget(trip, spent)
+
+    # Aggiungi voce alla checklist (controlla PRIMA di "mostra checklist", altrimenti ci finisce dentro)
+    add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+alla checklist", text_lower)
+    if add_checklist_match:
+        trip = await get_active_trip()
+        if not trip:
+            return "Nessun viaggio salvato al momento."
+        item = add_checklist_match.group(1).strip()
+        await add_checklist_item(trip["id"], item)
+        return f"✅ Aggiunto *{item}* alla checklist."
+
+    # Checklist viaggio
+    if any(w in text_lower for w in ["checklist viaggio", "checklist", "cosa devo portare", "lista viaggio"]):
+        trip = await get_active_trip()
+        if not trip:
+            return "Nessun viaggio salvato al momento."
+        items = await get_checklist(trip["id"])
+        return format_checklist(items)
+
+    # Segna voce checklist come fatta: "fatto <voce>" (con testo dopo, non il "fatto" secco di conferma)
+    fatto_match = _re.match(r"^fatto\s+(.+)", text_lower)
+    if fatto_match:
+        trip = await get_active_trip()
+        if trip:
+            found = await mark_checklist_item(trip["id"], fatto_match.group(1).strip())
+            if found:
+                return f"✅ Segnato: *{found}*"
 
     # Prestito restituito
     returned_match = _re.search(r"restituito\s+(\w+)", text_lower)
@@ -471,6 +533,27 @@ Testo: {user_text}"""
     data = json.loads(raw[start:end])
     dt = datetime.strptime(f"{data['date']} {data['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
     return await add_reminder(data["text"], dt)
+
+
+async def handle_new_trip_start(user_text: str) -> str:
+    """Estrae le date del viaggio dal testo, avvia il flusso (chiede destinazione)."""
+    today = datetime.now(ROME)
+    prompt = f"""Oggi è {today.strftime('%Y-%m-%d')}.
+Estrai dal testo la data di inizio e fine di un viaggio/vacanza.
+Rispondi SOLO con JSON: {{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}}
+Interpreta date relative italiane. Se manca la data di fine, usa la stessa data di inizio.
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 60, "temperature": 0})
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    start_idx = raw.find("{"); end_idx = raw.rfind("}") + 1
+    data = json.loads(raw[start_idx:end_idx])
+    await save_pending("new_trip_dates", {"start": data["start"], "end": data["end"]})
+    return "Dove andrai?"
 
 
 async def _extract_search_query(user_text: str) -> str:
