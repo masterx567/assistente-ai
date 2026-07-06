@@ -312,8 +312,9 @@ def tick():
         asyncio.run(save_pending("fineco_balance", {}))
         done.append("monthly")
 
-    # Sync banca Enable Banking: ogni 2h esatte (00, 02, 04...)
-    if h % 2 == 0 and m <= 4:
+    # Sync banca Enable Banking: 2x/giorno (08:00, 20:00) — ridotto da ogni 2h per stare
+    # sotto la quota giornaliera ASPSP (rate limit scoperto il 03/07)
+    if h in (8, 20) and m <= 4:
         result = asyncio.run(sync_transactions(days_back=3))
         done.append(f"bank_sync:{result.get('saved', 0)}saved")
 
