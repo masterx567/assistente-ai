@@ -240,10 +240,14 @@ async def route_message(user_text: str) -> str:
         return await handle_new_trip_start(user_text)
 
     # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
-    if _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio", text_lower):
+    _del_trip_match = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio\s*(.*)", text_lower)
+    if _del_trip_match:
         trip = await get_active_trip()
         if not trip:
             return "Nessun viaggio salvato al momento."
+        named = _del_trip_match.group(1).strip()
+        if named and named not in trip["destinazione"].lower():
+            return f"Il viaggio attivo è *{trip['destinazione']}*, non '{named}'. Scrivi solo \"elimina viaggio\" per confermare quello."
         await delete_trip(trip["id"])
         return f"✅ Viaggio a *{trip['destinazione']}* eliminato."
 
