@@ -70,6 +70,18 @@ async def get_active_trip() -> dict | None:
     return {"id": page["id"], "destinazione": name, "start": start, "end": end, "budget": budget}
 
 
+async def delete_trip(trip_id: str) -> None:
+    """Archivia il viaggio e tutte le sue voci checklist."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_CHECKLIST}/query", headers=HEADERS, json={
+            "filter": {"property": "viaggio", "relation": {"contains": trip_id}},
+            "page_size": 50,
+        })
+        for page in r.json().get("results", []):
+            await client.patch(f"https://api.notion.com/v1/pages/{page['id']}", headers=HEADERS, json={"archived": True})
+        await client.patch(f"https://api.notion.com/v1/pages/{trip_id}", headers=HEADERS, json={"archived": True})
+
+
 async def get_trip_spending(trip: dict) -> float:
     """Somma le spese sincronizzate (source=api) nel periodo del viaggio."""
     from agents.enable_banking import DB_TRANSACTIONS, NOTION_HEADERS

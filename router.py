@@ -11,7 +11,7 @@ from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
-from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction
+from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -239,6 +239,14 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in trip_start_kw) or (_trip_verb and _trip_date):
         return await handle_new_trip_start(user_text)
 
+    # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
+    if _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio", text_lower):
+        trip = await get_active_trip()
+        if not trip:
+            return "Nessun viaggio salvato al momento."
+        await delete_trip(trip["id"])
+        return f"✅ Viaggio a *{trip['destinazione']}* eliminato."
+
     # Budget viaggio rimanente
     _budget_trip_kw = any(w in text_lower for w in ["budget viaggio", "quanto budget viaggio", "quanto mi resta per il viaggio", "quanto ho speso in viaggio"])
     if _budget_trip_kw or ("budget" in text_lower):
@@ -265,6 +273,22 @@ async def route_message(user_text: str) -> str:
         item = add_checklist_match.group(1).strip()
         await add_checklist_item(trip["id"], item)
         return f"✅ Aggiunto *{item}* alla checklist."
+
+    # "aggiungi X" senza "alla checklist": se c'è un viaggio attivo e il testo non ha
+    # una data/ora, è quasi certamente una voce checklist dimenticata, non un evento
+    # calendario a caso (un evento senza data non ha senso — l'LLM ne inventerebbe una)
+    _bare_add_match = _re.match(r"^aggiungi(?:mi)?\s+(.+)", text_lower)
+    if _bare_add_match:
+        _has_date = _re.search(
+            r"\b(oggi|domani|dopodomani|luned|marted|mercoled|gioved|venerd|sabato|domenica|"
+            r"gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)|"
+            r"\d{1,2}[:.]\d{2}|\d{1,2}\s*[-/]\s*\d{1,2}|\balle\s+\d{1,2}\b", text_lower)
+        if not _has_date:
+            trip = await get_active_trip()
+            if trip:
+                item = _bare_add_match.group(1).strip()
+                await add_checklist_item(trip["id"], item)
+                return f"✅ Aggiunto *{item}* alla checklist."
 
     # Checklist viaggio
     if any(w in text_lower for w in ["checklist viaggio", "checklist", "cosa devo portare", "lista viaggio"]):
