@@ -264,7 +264,7 @@ def eb_auth_start():
     from agents.enable_banking import EB_API, _eb_headers
     import time
     body = {
-        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=180)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
+        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=89)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
         "aspsp": {"name": "Isybank", "country": "IT"},
         "state": f"reauth-{int(time.time())}",
         "redirect_url": "https://assistente-ai-three.vercel.app/callback",
