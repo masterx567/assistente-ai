@@ -1,7 +1,7 @@
 import os
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -255,117 +255,6 @@ def webhook():
             send_telegram(reply)
 
     return jsonify({"ok": True})
-
-
-@app.route("/api/eb-auth-start")
-def eb_auth_start():
-    """TEMP: avvia nuova autorizzazione Enable Banking per Isybank (sessione scaduta)."""
-    _require_cron_secret()
-    from agents.enable_banking import EB_API, _eb_headers
-    import time
-    body = {
-        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=89)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
-        "aspsp": {"name": "Isybank", "country": "IT"},
-        "state": f"reauth-{int(time.time())}",
-        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
-        "psu_type": "personal",
-    }
-    with httpx.Client(timeout=15) as c:
-        r = c.post(f"{EB_API}/auth", headers=_eb_headers(), json=body)
-    data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {"raw": r.text[:500]}
-    return jsonify({"status": r.status_code, "auth_url": data.get("url"), "body": data if not data.get("url") else None})
-
-
-@app.route("/api/eb-auth-finish")
-def eb_auth_finish():
-    """TEMP: scambia il code col nuovo account_uid. Non espone mai session_id/token, solo l'uid (non sensibile senza la nostra chiave app)."""
-    _require_cron_secret()
-    from agents.enable_banking import EB_API, _eb_headers
-    code = request.args.get("code", "")
-    if not code:
-        return jsonify({"ok": False, "error": "missing code param"})
-    with httpx.Client(timeout=15) as c:
-        r = c.post(f"{EB_API}/sessions", headers=_eb_headers(), json={"code": code})
-    if r.status_code != 200:
-        return jsonify({"ok": False, "step": "exchange", "status": r.status_code, "body": r.text[:300]})
-    accounts = r.json().get("accounts", [])
-    if not accounts:
-        return jsonify({"ok": False, "step": "exchange", "error": "no accounts in session"})
-    acc = accounts[0]
-    new_uid = acc["uid"] if isinstance(acc, dict) else acc
-    with httpx.Client(timeout=15) as c:
-        r2 = c.get(f"{EB_API}/accounts/{new_uid}/transactions", params={"date_from": "2026-06-30"}, headers=_eb_headers())
-    return jsonify({
-        "ok": r2.status_code == 200,
-        "new_account_uid": new_uid,
-        "transactions_status": r2.status_code,
-        "transactions_count": len(r2.json().get("transactions", [])) if r2.status_code == 200 else None,
-    })
-
-
-@app.route("/api/eb-test-uid")
-def eb_test_uid():
-    """TEMP: testa transactions per un account_uid dato (senza rifare l'exchange)."""
-    _require_cron_secret()
-    from agents.enable_banking import EB_API, _eb_headers
-    uid = request.args.get("uid", "")
-    with httpx.Client(timeout=15) as c:
-        r = c.get(f"{EB_API}/accounts/{uid}/transactions", params={"date_from": "2026-06-30"}, headers=_eb_headers())
-    return jsonify({
-        "status": r.status_code,
-        "count": len(r.json().get("transactions", [])) if r.status_code == 200 else None,
-        "body": r.text[:300] if r.status_code != 200 else None,
-    })
-
-
-@app.route("/api/eb-sync-now")
-def eb_sync_now():
-    """TEMP: forza sync_transactions subito, fuori dalla finestra oraria (per verifica)."""
-    _require_cron_secret()
-    result = asyncio.run(sync_transactions(days_back=7))
-    return jsonify(result)
-
-
-@app.route("/api/eb-debug")
-def eb_debug():
-    """TEMP: diagnostica sync Enable Banking (nessun segreto nella risposta)."""
-    _require_cron_secret()
-    import asyncio
-    from agents.enable_banking import _fetch_transactions, session_expiry_days, EB_SESSION_ID, EB_PRIVATE_KEY
-
-    info = {
-        "session_id_set": bool(EB_SESSION_ID),
-        "private_key_set": bool(EB_PRIVATE_KEY),
-        "session_expiry_days": session_expiry_days(),
-    }
-    try:
-        txs = asyncio.run(_fetch_transactions(days_back=7))
-        info["fetch_ok"] = True
-        info["count"] = len(txs)
-        info["dates"] = [t.get("booking_date") for t in txs][:10]
-    except Exception as e:
-        info["fetch_ok"] = False
-        info["error"] = f"{type(e).__name__}: {e}"
-
-    from agents.enable_banking import _eb_headers, EB_API, EB_ACCOUNT_UID
-
-    async def _raw_call():
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.get(
-                f"{EB_API}/accounts/{EB_ACCOUNT_UID}/transactions",
-                params={"date_from": "2026-06-30"},
-                headers=_eb_headers(),
-            )
-            return r.status_code, r.text[:500]
-
-    try:
-        status, body = asyncio.run(_raw_call())
-        info["raw_status"] = status
-        info["raw_body"] = body
-    except Exception as e:
-        info["raw_error"] = f"{type(e).__name__}: {e}"
-
-    return jsonify(info)
 
 
 @app.route("/api/tick")
