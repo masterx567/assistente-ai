@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend
 import re as _re
 from agents.news import get_morning_briefing
-from agents.calendar import get_events, get_events_in_range, format_events, add_event, delete_event_by_title, rename_event, reschedule_event, search_events
+from agents.calendar import get_events, get_events_in_range, format_events, add_event, add_multiday_event, delete_event_by_title, rename_event, reschedule_event, search_events
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
@@ -108,14 +108,16 @@ async def route_message(user_text: str) -> str:
 
     # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione.
     # Basta la parola "viaggio"/"vacanza" + una data ovunque nel testo — controllato PRIMA di
-    # qualsiasi comando calendario, perché "evento"/mesi/date ci finiscono facilmente dentro
-    # (es. "crea evento viaggio Bruxelles dal 1 al 3 settembre" contiene "evento" e "settembre").
+    # qualsiasi comando calendario, perché "evento"/mesi/date ci finiscono facilmente dentro.
+    # Esclude "evento" esplicito: se l'utente dice "crea evento" vuole un evento calendario
+    # vero, non il modulo budget/checklist viaggi.
     _trip_word = any(w in text_lower for w in ["viaggio", "vacanza"])
     _trip_verb = _re.search(r"\b(sarò|andrò|vado|partirò)\s+(in|a|per)\s+\w+", text_lower)
     _trip_date = _re.search(r"\bdal\s+\d{1,2}\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|"
                              r"\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b", text_lower)
     _trip_delete = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio", text_lower)
-    if (_trip_word or _trip_verb) and _trip_date and not _trip_delete:
+    _explicit_calendar_event = "evento" in text_lower
+    if (_trip_word or _trip_verb) and _trip_date and not _trip_delete and not _explicit_calendar_event:
         return await handle_new_trip_start(user_text)
 
     # Conferma/annulla azione pending
@@ -169,8 +171,9 @@ async def route_message(user_text: str) -> str:
         "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
     }
     _cal_ctx = ["event", "agenda", "impegn", "appuntament", "calendar", "cosa ho", "cosa c'è", "mi dici"]
+    _cal_action_verb = any(w in text_lower for w in ["crea", "aggiungi", "elimina", "cancella", "modifica", "sposta", "rinomina", "segna"])
     matched_month = next((m for m in _months_cal if m in text_lower), None)
-    if matched_month and any(w in text_lower for w in _cal_ctx):
+    if matched_month and any(w in text_lower for w in _cal_ctx) and not _cal_action_verb:
         import calendar as _cal_mod
         from datetime import date as _date
         now_year = datetime.now().year
@@ -268,7 +271,8 @@ async def route_message(user_text: str) -> str:
             return "Nessun viaggio salvato al momento."
 
     # Aggiungi voce alla checklist (controlla PRIMA di "mostra checklist", altrimenti ci finisce dentro)
-    add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+alla checklist", text_lower)
+    # Accetta "checklist"/"check-list"/"check list" e "alla"/"nella"
+    add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+(?:alla|nella)\s+check[\s-]?list", text_lower)
     if add_checklist_match:
         trip = await get_active_trip()
         if not trip:
@@ -482,6 +486,8 @@ Ogni azione ha:
 - "new_title": nuovo nome (solo per rename)
 - "date": "YYYY-MM-DD" (per add e reschedule)
 - "time": "HH:MM" (per add e reschedule, default "09:00" se non specificato)
+- "end_date": "YYYY-MM-DD" (SOLO per add, SOLO se il testo indica un intervallo di più giorni,
+  es. "dal 1 al 3 settembre" o "vacanza dal 10 al 20 agosto". Omettere se un solo giorno.)
 
 Interpreta date relative in italiano (oggi, domani, lunedì, ecc.).
 IMPORTANTE: le parole "impegno", "evento", "appuntamento" sono parole generiche, NON fanno parte del titolo. Ignorale nel titolo.
@@ -490,6 +496,7 @@ Rispondi SOLO con il JSON array, zero altro testo.
 Esempi:
 - "aggiungi dentista domani alle 10" → [{{"action":"add","title":"dentista","date":"{(today + timedelta(days=1)).strftime('%Y-%m-%d')}","time":"10:00"}}]
 - "elimina riunione e aggiungi palestra venerdì alle 18" → [{{"action":"delete","title":"riunione"}},{{"action":"add","title":"palestra","date":"2026-06-27","time":"18:00"}}]
+- "crea evento vacanza Bruxelles dal 1 al 3 settembre 2026" → [{{"action":"add","title":"vacanza Bruxelles","date":"2026-09-01","end_date":"2026-09-03"}}]
 - "modifica nome da vecchio nome a nuovo nome" → [{{"action":"rename","old_title":"vecchio nome","new_title":"nuovo nome"}}]
 - "rinomina dentista in visita medica" → [{{"action":"rename","old_title":"dentista","new_title":"visita medica"}}]
 - "sposta dentista a venerdì alle 15" → [{{"action":"reschedule","title":"dentista","date":"2026-06-27","time":"15:00"}}]
@@ -517,8 +524,14 @@ async def handle_calendar_action(user_text: str) -> str:
         results = []
         for a in actions:
             if a["action"] == "add":
-                dt = datetime.strptime(f"{a['date']} {a['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
-                results.append(await add_event(a["title"], dt))
+                if a.get("end_date") and a["end_date"] != a["date"]:
+                    from datetime import date as _date
+                    start_d = _date.fromisoformat(a["date"])
+                    end_d = _date.fromisoformat(a["end_date"])
+                    results.append(await add_multiday_event(a["title"], start_d, end_d))
+                else:
+                    dt = datetime.strptime(f"{a['date']} {a['time']}", "%Y-%m-%d %H:%M").replace(tzinfo=ROME)
+                    results.append(await add_event(a["title"], dt))
             elif a["action"] == "delete":
                 results.append(await delete_event_by_title(a["title"]))
             elif a["action"] == "rename":
