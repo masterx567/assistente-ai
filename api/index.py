@@ -257,6 +257,29 @@ def webhook():
     return jsonify({"ok": True})
 
 
+@app.route("/api/eb-debug")
+def eb_debug():
+    """TEMP: diagnostica sync Enable Banking (nessun segreto nella risposta)."""
+    _require_cron_secret()
+    import asyncio
+    from agents.enable_banking import _fetch_transactions, session_expiry_days, EB_SESSION_ID, EB_PRIVATE_KEY
+
+    info = {
+        "session_id_set": bool(EB_SESSION_ID),
+        "private_key_set": bool(EB_PRIVATE_KEY),
+        "session_expiry_days": session_expiry_days(),
+    }
+    try:
+        txs = asyncio.run(_fetch_transactions(days_back=7))
+        info["fetch_ok"] = True
+        info["count"] = len(txs)
+        info["dates"] = [t.get("booking_date") for t in txs][:10]
+    except Exception as e:
+        info["fetch_ok"] = False
+        info["error"] = f"{type(e).__name__}: {e}"
+    return jsonify(info)
+
+
 @app.route("/api/tick")
 def tick():
     _require_cron_secret()
