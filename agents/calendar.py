@@ -56,6 +56,33 @@ async def add_event(title: str, start_dt: datetime, end_dt: datetime = None) -> 
     return f"Errore creazione evento: {r.status_code}"
 
 
+async def add_multiday_event(title: str, start_date: date, end_date: date) -> str:
+    """Evento 'intera giornata' su più giorni (es. vacanza). Google richiede la data
+    di fine ESCLUSIVA, quindi +1 giorno rispetto all'ultimo giorno effettivo."""
+    token = await _get_access_token()
+    if not token:
+        return "Credenziali Google Calendar non configurate."
+
+    body = {
+        "summary": title,
+        "start": {"date": start_date.isoformat()},
+        "end": {"date": (end_date + timedelta(days=1)).isoformat()},
+    }
+
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post(
+            f"https://www.googleapis.com/calendar/v3/calendars/{CALENDAR_ID}/events",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+        )
+
+    if r.status_code in (200, 201):
+        s = start_date.strftime("%d/%m")
+        e = end_date.strftime("%d/%m")
+        return f"✅ Aggiunto: *{title}* — dal {s} al {e}"
+    return f"Errore creazione evento: {r.status_code}"
+
+
 async def rename_event(old_title: str, new_title: str) -> str:
     token = await _get_access_token()
     if not token:
