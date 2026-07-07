@@ -291,7 +291,8 @@ def eb_auth_finish():
     accounts = r.json().get("accounts", [])
     if not accounts:
         return jsonify({"ok": False, "step": "exchange", "error": "no accounts in session"})
-    new_uid = accounts[0]
+    acc = accounts[0]
+    new_uid = acc["uid"] if isinstance(acc, dict) else acc
     with httpx.Client(timeout=15) as c:
         r2 = c.get(f"{EB_API}/accounts/{new_uid}/transactions", params={"date_from": "2026-06-30"}, headers=_eb_headers())
     return jsonify({
@@ -299,6 +300,21 @@ def eb_auth_finish():
         "new_account_uid": new_uid,
         "transactions_status": r2.status_code,
         "transactions_count": len(r2.json().get("transactions", [])) if r2.status_code == 200 else None,
+    })
+
+
+@app.route("/api/eb-test-uid")
+def eb_test_uid():
+    """TEMP: testa transactions per un account_uid dato (senza rifare l'exchange)."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, _eb_headers
+    uid = request.args.get("uid", "")
+    with httpx.Client(timeout=15) as c:
+        r = c.get(f"{EB_API}/accounts/{uid}/transactions", params={"date_from": "2026-06-30"}, headers=_eb_headers())
+    return jsonify({
+        "status": r.status_code,
+        "count": len(r.json().get("transactions", [])) if r.status_code == 200 else None,
+        "body": r.text[:300] if r.status_code != 200 else None,
     })
 
 
