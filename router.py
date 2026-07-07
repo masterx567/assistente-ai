@@ -115,7 +115,8 @@ async def route_message(user_text: str) -> str:
     _trip_date = _re.search(r"\bdal\s+\d{1,2}\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|"
                              r"\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b", text_lower)
     _trip_delete = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio", text_lower)
-    if (_trip_word or _trip_verb) and _trip_date and not _trip_delete:
+    _explicit_calendar_event = "evento" in text_lower
+    if (_trip_word or _trip_verb) and _trip_date and not _trip_delete and not _explicit_calendar_event:
         return await handle_new_trip_start(user_text)
 
     # Conferma/annulla azione pending
