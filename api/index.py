@@ -318,6 +318,14 @@ def eb_test_uid():
     })
 
 
+@app.route("/api/eb-sync-now")
+def eb_sync_now():
+    """TEMP: forza sync_transactions subito, fuori dalla finestra oraria (per verifica)."""
+    _require_cron_secret()
+    result = asyncio.run(sync_transactions(days_back=7))
+    return jsonify(result)
+
+
 @app.route("/api/eb-debug")
 def eb_debug():
     """TEMP: diagnostica sync Enable Banking (nessun segreto nella risposta)."""
