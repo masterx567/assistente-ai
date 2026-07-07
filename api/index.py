@@ -277,6 +277,25 @@ def eb_debug():
     except Exception as e:
         info["fetch_ok"] = False
         info["error"] = f"{type(e).__name__}: {e}"
+
+    from agents.enable_banking import _eb_headers, EB_API, EB_ACCOUNT_UID
+
+    async def _raw_call():
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.get(
+                f"{EB_API}/accounts/{EB_ACCOUNT_UID}/transactions",
+                params={"date_from": "2026-06-30"},
+                headers=_eb_headers(),
+            )
+            return r.status_code, r.text[:500]
+
+    try:
+        status, body = asyncio.run(_raw_call())
+        info["raw_status"] = status
+        info["raw_body"] = body
+    except Exception as e:
+        info["raw_error"] = f"{type(e).__name__}: {e}"
+
     return jsonify(info)
 
 
