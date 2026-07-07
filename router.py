@@ -170,8 +170,9 @@ async def route_message(user_text: str) -> str:
         "settembre": 9, "ottobre": 10, "novembre": 11, "dicembre": 12,
     }
     _cal_ctx = ["event", "agenda", "impegn", "appuntament", "calendar", "cosa ho", "cosa c'è", "mi dici"]
+    _cal_action_verb = any(w in text_lower for w in ["crea", "aggiungi", "elimina", "cancella", "modifica", "sposta", "rinomina", "segna"])
     matched_month = next((m for m in _months_cal if m in text_lower), None)
-    if matched_month and any(w in text_lower for w in _cal_ctx):
+    if matched_month and any(w in text_lower for w in _cal_ctx) and not _cal_action_verb:
         import calendar as _cal_mod
         from datetime import date as _date
         now_year = datetime.now().year
