@@ -1,7 +1,7 @@
 import os
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -255,6 +255,51 @@ def webhook():
             send_telegram(reply)
 
     return jsonify({"ok": True})
+
+
+@app.route("/api/eb-auth-start")
+def eb_auth_start():
+    """TEMP: avvia nuova autorizzazione Enable Banking per Isybank (sessione scaduta)."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, _eb_headers
+    import time
+    body = {
+        "access": {"valid_until": (datetime.now(ROME) + timedelta(days=180)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")},
+        "aspsp": {"name": "Isybank", "country": "IT"},
+        "state": f"reauth-{int(time.time())}",
+        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
+        "psu_type": "personal",
+    }
+    with httpx.Client(timeout=15) as c:
+        r = c.post(f"{EB_API}/auth", headers=_eb_headers(), json=body)
+    data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {"raw": r.text[:500]}
+    return jsonify({"status": r.status_code, "auth_url": data.get("url"), "body": data if not data.get("url") else None})
+
+
+@app.route("/api/eb-auth-finish")
+def eb_auth_finish():
+    """TEMP: scambia il code col nuovo account_uid. Non espone mai session_id/token, solo l'uid (non sensibile senza la nostra chiave app)."""
+    _require_cron_secret()
+    from agents.enable_banking import EB_API, _eb_headers
+    code = request.args.get("code", "")
+    if not code:
+        return jsonify({"ok": False, "error": "missing code param"})
+    with httpx.Client(timeout=15) as c:
+        r = c.post(f"{EB_API}/sessions", headers=_eb_headers(), json={"code": code})
+    if r.status_code != 200:
+        return jsonify({"ok": False, "step": "exchange", "status": r.status_code, "body": r.text[:300]})
+    accounts = r.json().get("accounts", [])
+    if not accounts:
+        return jsonify({"ok": False, "step": "exchange", "error": "no accounts in session"})
+    new_uid = accounts[0]
+    with httpx.Client(timeout=15) as c:
+        r2 = c.get(f"{EB_API}/accounts/{new_uid}/transactions", params={"date_from": "2026-06-30"}, headers=_eb_headers())
+    return jsonify({
+        "ok": r2.status_code == 200,
+        "new_account_uid": new_uid,
+        "transactions_status": r2.status_code,
+        "transactions_count": len(r2.json().get("transactions", [])) if r2.status_code == 200 else None,
+    })
 
 
 @app.route("/api/eb-debug")
