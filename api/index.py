@@ -17,7 +17,7 @@ from agents.errors import log_error
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
 from agents.reminders import get_pending_reminders, mark_sent
-from agents.enable_banking import sync_transactions, session_expiry_days
+from agents.enable_banking import sync_transactions
 from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.journal import get_streak_days, format_streak_message
 
@@ -386,14 +386,6 @@ def tick():
         if loan_msgs:
             done.append(f"loan_reminders:{len(loan_msgs)}")
 
-        days_left = session_expiry_days()
-        if 0 <= days_left <= 5:
-            reminder_lines.append(
-                f"⚠️ *Enable Banking* scade tra {days_left} giorni ({days_left + 1}/09).\n"
-                f"Rinnova l'autorizzazione Isybank per non perdere il sync automatico."
-            )
-            done.append("eb_expiry_reminder")
-
         if reminder_lines:
             parts.append("🔔 *PROMEMORIA*\n\n" + "\n\n".join(reminder_lines))
 
@@ -449,6 +441,11 @@ def tick():
     if h in (8, 20) and m <= 4:
         result = asyncio.run(sync_transactions(days_back=3))
         done.append(f"bank_sync:{result.get('saved', 0)}saved")
+        if result.get("auth_error") and _once(f"eb_auth_error:{now.date()}"):
+            send_telegram(
+                f"⚠️ *Sync banca Isybank fermo* — sessione Enable Banking scaduta ({result['auth_error']}).\n"
+                f"Serve ri-autorizzare l'accesso alla banca."
+            )
 
     # Reminders eventi calendario
     done.extend(_check_reminders(now))

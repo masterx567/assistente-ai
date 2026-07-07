@@ -317,6 +317,10 @@ async def _sum_synced_since(since_date: str) -> float:
     return total
 
 
+class EBAuthError(Exception):
+    """Sessione/consenso Enable Banking non più valido (serve ri-autorizzare)."""
+
+
 async def _fetch_transactions(days_back: int = 3) -> list[dict]:
     if not EB_SESSION_ID or not EB_PRIVATE_KEY:
         return []
@@ -330,6 +334,9 @@ async def _fetch_transactions(days_back: int = 3) -> list[dict]:
                 params=params,
                 headers=_eb_headers(),
             )
+            if r.status_code == 401:
+                err = r.json().get("error", "EXPIRED_SESSION") if r.headers.get("content-type", "").startswith("application/json") else "EXPIRED_SESSION"
+                raise EBAuthError(err)
             if r.status_code != 200:
                 break
             data = r.json()
@@ -349,7 +356,11 @@ async def sync_transactions(days_back: int = 3) -> dict:
     chiamate a /balances, che va in rate limit su Isybank)."""
     from agents.budget import save_account_balance
 
-    txs = await _fetch_transactions(days_back)
+    try:
+        txs = await _fetch_transactions(days_back)
+    except EBAuthError as e:
+        return {"fetched": 0, "saved": 0, "skipped": 0, "auth_error": str(e)}
+
     if not txs:
         result = {"fetched": 0, "saved": 0, "skipped": 0, "error": "No transactions or missing config"}
     else:
