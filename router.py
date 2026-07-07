@@ -268,7 +268,7 @@ async def route_message(user_text: str) -> str:
             return "Nessun viaggio salvato al momento."
 
     # Aggiungi voce alla checklist (controlla PRIMA di "mostra checklist", altrimenti ci finisce dentro)
-    add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+alla checklist", text_lower)
+    add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+(?:alla|nella)\s+check[\s-]?list", text_lower)
     if add_checklist_match:
         trip = await get_active_trip()
         if not trip:
