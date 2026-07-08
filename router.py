@@ -11,7 +11,7 @@ from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
-from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
+from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -294,6 +294,17 @@ async def route_message(user_text: str) -> str:
             return text
         if _budget_trip_kw:
             return "Nessun viaggio salvato al momento."
+
+    # Elimina voce dalla checklist (controlla PRIMA di "aggiungi", stessa forma di frase)
+    del_checklist_match = _re.search(r"(?:elimina|rimuovi|cancella)\s+(.+?)\s+(?:dalla|dalla mia)\s+check[\s-]?list", text_lower)
+    if del_checklist_match:
+        trip = await get_active_trip()
+        if not trip:
+            return "Nessun viaggio salvato al momento."
+        found = await delete_checklist_item(trip["id"], del_checklist_match.group(1).strip())
+        if found:
+            return f"🗑️ Eliminato *{found}* dalla checklist."
+        return "Non ho trovato quella voce nella checklist."
 
     # Aggiungi voce alla checklist (controlla PRIMA di "mostra checklist", altrimenti ci finisce dentro)
     add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+(?:alla|nella)\s+check[\s-]?list", text_lower)

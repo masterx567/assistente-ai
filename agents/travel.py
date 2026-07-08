@@ -223,6 +223,18 @@ async def mark_checklist_item(trip_id: str, query: str) -> str | None:
     return match["testo"]
 
 
+async def delete_checklist_item(trip_id: str, query: str) -> str | None:
+    """Elimina (archivia) la voce che matcha meglio query. Ritorna il testo trovato o None."""
+    items = await get_checklist(trip_id)
+    query_l = query.lower().strip()
+    match = next((i for i in items if query_l in i["testo"].lower() or i["testo"].lower() in query_l), None)
+    if not match:
+        return None
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.patch(f"https://api.notion.com/v1/pages/{match['id']}", headers=HEADERS, json={"archived": True})
+    return match["testo"]
+
+
 async def add_checklist_item(trip_id: str, testo: str) -> None:
     async with httpx.AsyncClient(timeout=10) as client:
         await client.post("https://api.notion.com/v1/pages", headers=HEADERS, json={
