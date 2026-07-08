@@ -34,6 +34,35 @@ Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggi
 async def route_message(user_text: str) -> str:
     text_lower = user_text.lower().strip().rstrip(".!?,;:")
 
+    # Conferma/annulla azione pending — PRIMA di qualsiasi consumo di testo da parte dei
+    # flussi sotto (viaggio, fineco, ecc.), altrimenti "annulla"/"/fine" verrebbe letto
+    # come risposta al flusso stesso (es. destinazione viaggio).
+    _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
+    _cancel_kw  = {"no", "annulla", "stop", "abort", "lascia perdere", "lasciare perdere", "non fare", "non voglio", "/fine"}
+    if text_lower in _confirm_kw:
+        return await handle_confirm()
+    if text_lower in _cancel_kw or any(text_lower.startswith(w) for w in ("no ", "annull", "lascia perd")):
+        return await handle_cancel()
+
+    # Comandi Telegram "/" per avviare moduli multi-step senza passare da parole chiave
+    if text_lower.startswith("/viaggio"):
+        rest = user_text.strip()[len("/viaggio"):].strip()
+        _has_date_cmd = _re.search(
+            r"\bdal\s+\d{1,2}\b|\b\d{1,2}\s*[-/]\s*\d{1,2}\b|"
+            r"\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b",
+            rest.lower())
+        if rest and _has_date_cmd:
+            return await handle_new_trip_start(rest)
+        await save_pending("new_trip_awaiting_dates", {})
+        return "Che date? (es: dal 1 al 3 settembre)"
+
+    if text_lower == "/checklist":
+        trip = await get_active_trip()
+        if not trip:
+            return "Nessun viaggio salvato al momento."
+        items = await get_checklist(trip["id"])
+        return {"text": format_checklist(items), "markup": checklist_buttons(items)}
+
     # Rimuovi prefissi conversazionali per normalizzare il testo prima del routing
     _conv_prefixes = [
         "mi puoi dire ", "puoi dirmi ", "potresti dirmi ", "potresti dirci ",
@@ -86,8 +115,13 @@ async def route_message(user_text: str) -> str:
             await save_account_balance("Fineco ETF", amount, "investment")
             return await get_net_worth()
 
-    # Nuovo viaggio: step 2 (destinazione, testo libero) e step 3 (budget, numero)
+    # Nuovo viaggio via comando "/viaggio" senza date: step 0, estrae le date dalla risposta libera
     _trip_pending = await get_pending()
+    if _trip_pending and _trip_pending["action"] == "new_trip_awaiting_dates":
+        await clear_pending(_trip_pending["id"])
+        return await handle_new_trip_start(user_text)
+
+    # Nuovo viaggio: step 2 (destinazione, testo libero) e step 3 (budget, numero)
     if _trip_pending and _trip_pending["action"] == "new_trip_dates":
         await clear_pending(_trip_pending["id"])
         await save_pending("new_trip_budget", {**_trip_pending["payload"], "destinazione": user_text.strip()})
@@ -118,14 +152,6 @@ async def route_message(user_text: str) -> str:
     _explicit_calendar_event = "evento" in text_lower
     if (_trip_word or _trip_verb) and _trip_date and not _trip_delete and not _explicit_calendar_event:
         return await handle_new_trip_start(user_text)
-
-    # Conferma/annulla azione pending
-    _confirm_kw = {"sì", "si", "yes", "confermo", "ok", "vai", "esegui", "procedi", "fatto", "perfetto", "giusto", "esatto", "corretto"}
-    _cancel_kw  = {"no", "annulla", "stop", "abort", "lascia perdere", "lasciare perdere", "non fare", "non voglio"}
-    if text_lower in _confirm_kw:
-        return await handle_confirm()
-    if text_lower in _cancel_kw or any(text_lower.startswith(w) for w in ("no ", "annull", "lascia perd")):
-        return await handle_cancel()
 
     # Entrate (controlla PRIMA delle transazioni spese)
     income_kw = [
