@@ -298,7 +298,7 @@ async def route_message(user_text: str) -> str:
     # Elimina voce dalla checklist (controlla PRIMA di "aggiungi", stessa forma di frase)
     del_checklist_match = _re.search(
         r"(?:elimina(?:re|mi)?|rimuov[ie](?:re)?|cancell[ao](?:re)?|togli(?:ere|mi)?|leva(?:re|mi)?)\s+"
-        r"(.+?)\s+(?:dal(?:la)?(?:\s+mia)?)\s+check[\s-]?list", text_lower)
+        r"(.+?)\s+(?:dalla|dal|da)(?:\s+mia)?\s+/?check[\s-]?list", text_lower)
     if del_checklist_match:
         trip = await get_active_trip()
         if not trip:
@@ -309,7 +309,7 @@ async def route_message(user_text: str) -> str:
         return "Non ho trovato quella voce nella checklist."
 
     # Aggiungi voce alla checklist (controlla PRIMA di "mostra checklist", altrimenti ci finisce dentro)
-    add_checklist_match = _re.search(r"aggiungi\s+(.+?)\s+(?:alla|nella)\s+check[\s-]?list", text_lower)
+    add_checklist_match = _re.search(r"aggiungi(?:mi)?\s+(.+?)\s+(?:alla|nella|a|in)(?:\s+mia)?\s+/?check[\s-]?list", text_lower)
     if add_checklist_match:
         trip = await get_active_trip()
         if not trip:
