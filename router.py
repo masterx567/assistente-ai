@@ -296,7 +296,9 @@ async def route_message(user_text: str) -> str:
             return "Nessun viaggio salvato al momento."
 
     # Elimina voce dalla checklist (controlla PRIMA di "aggiungi", stessa forma di frase)
-    del_checklist_match = _re.search(r"(?:elimina|rimuovi|cancella)\s+(.+?)\s+(?:dalla|dalla mia)\s+check[\s-]?list", text_lower)
+    del_checklist_match = _re.search(
+        r"(?:elimina(?:re|mi)?|rimuov[ie](?:re)?|cancell[ao](?:re)?|togli(?:ere|mi)?|leva(?:re|mi)?)\s+"
+        r"(.+?)\s+(?:dal(?:la)?(?:\s+mia)?)\s+check[\s-]?list", text_lower)
     if del_checklist_match:
         trip = await get_active_trip()
         if not trip:
