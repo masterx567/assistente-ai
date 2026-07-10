@@ -24,6 +24,24 @@ async def _get_access_token() -> str | None:
     return r.json().get("access_token")
 
 
+async def check_calendar_auth() -> str | None:
+    """Ritorna None se il refresh token funziona, altrimenti il motivo del fallimento
+    (per alert proattivo — senza questo, un token revocato si scopre solo per caso)."""
+    if not all([GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN]):
+        return None
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post("https://oauth2.googleapis.com/token", data={
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "refresh_token": GOOGLE_REFRESH_TOKEN,
+            "grant_type": "refresh_token",
+        })
+    data = r.json()
+    if "access_token" in data:
+        return None
+    return data.get("error", "unknown_error")
+
+
 async def add_event(title: str, start_dt: datetime, end_dt: datetime = None) -> str:
     token = await _get_access_token()
     if not token:

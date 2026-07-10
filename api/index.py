@@ -18,6 +18,7 @@ from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
 from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions
+from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.journal import get_streak_days, format_streak_message
 
@@ -298,6 +299,14 @@ def tick():
         reminder_lines.extend(loan_msgs)
         if loan_msgs:
             done.append(f"loan_reminders:{len(loan_msgs)}")
+
+        gc_error = asyncio.run(check_calendar_auth())
+        if gc_error:
+            reminder_lines.append(
+                f"⚠️ *Google Calendar* non funziona — token revocato/scaduto ({gc_error}).\n"
+                f"Serve ri-autorizzare l'accesso al calendario."
+            )
+            done.append("gc_auth_error")
 
         if reminder_lines:
             parts.append("🔔 *PROMEMORIA*\n\n" + "\n\n".join(reminder_lines))
