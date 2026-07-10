@@ -13,8 +13,8 @@ DB_COMMITMENTS = "609fd00a-fe13-4900-bb2d-f460b134ea4e"
 # contro l'app della banca. Il saldo corrente si ricalcola sempre come
 # ANCHOR_BALANCE + somma transazioni sincronizzate (source=api) dopo questa data —
 # mai chiamando l'endpoint /balances (rate-limited su Isybank, 429 il 03/07/2026).
-ISYBANK_ANCHOR_DATE = "2026-07-06"
-ISYBANK_ANCHOR_BALANCE = 3019.36
+ISYBANK_ANCHOR_DATE = "2026-07-10"
+ISYBANK_ANCHOR_BALANCE = 3996.39
 
 _BNPL_KEYWORDS = ("KLARNA", "SCALAPAY", "PAGA IN 3 RATE", "PAYPAL *PAGA")
 _RE_RATE_COUNT = re.compile(r'IN\s+(\d+)\s+RATE', re.I)
