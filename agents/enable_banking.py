@@ -237,10 +237,12 @@ async def _tx_save(tx: dict, merchant: str, category_id: str | None) -> None:
 
 # ── BNPL (buy-now-pay-later) commitments ──────────────────────────────────────
 
-async def _find_active_commitment(merchant: str, amount: float) -> dict | None:
+async def _find_active_commitment(merchant: str, booking_date: str) -> dict | None:
     """Cerca piano attivo per merchant (case-insensitive — il testo remittance della banca
-    non usa maiuscole/minuscole in modo coerente, es. "Klarna*Ticketone" vs "Klarna*ticketone"),
-    con tolleranza ±10% sull'importo rata (evita duplicati per centesimi di differenza)."""
+    non usa maiuscole/minuscole in modo coerente, es. "Klarna*Ticketone" vs "Klarna*ticketone").
+    Matcha sulla DATA (rata più vicina alla next_due attesa, ±10gg), non sull'importo: le rate
+    Klarna/Scalapay non sono sempre uguali tra loro (es. prima rata più alta delle successive),
+    quindi confrontare gli importi creava piani duplicati per la stessa spesa."""
     body = {"filter": {"property": "amount_remaining", "number": {"greater_than": 0}}, "page_size": 20}
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.post(
@@ -248,6 +250,9 @@ async def _find_active_commitment(merchant: str, amount: float) -> dict | None:
             headers=NOTION_HEADERS, json=body,
         )
     merchant_l = merchant.lower()
+    tx_date = date.fromisoformat(booking_date)
+    best = None
+    best_diff = None
     for page in r.json().get("results", []):
         props = page["properties"]
         name_parts = props.get("Name", {}).get("title", [])
@@ -255,14 +260,18 @@ async def _find_active_commitment(merchant: str, amount: float) -> dict | None:
         if not name.startswith(merchant_l):
             continue
         remaining = props.get("amount_remaining", {}).get("number") or 0
-        installment = props.get("monthly_installment", {}).get("number") or 0
-        if remaining > 0 and installment > 0 and abs(installment - amount) / installment <= 0.10:
-            return {"page_id": page["id"], "remaining": remaining}
-    return None
+        due_iso = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]
+        if remaining <= 0 or not due_iso:
+            continue
+        diff = abs((date.fromisoformat(due_iso) - tx_date).days)
+        if diff <= 10 and (best_diff is None or diff < best_diff):
+            best = {"page_id": page["id"], "remaining": remaining}
+            best_diff = diff
+    return best
 
 
 async def _upsert_bnpl_commitment(merchant: str, amount: float, booking_date: str, remittance: str) -> None:
-    existing = await _find_active_commitment(merchant, amount)
+    existing = await _find_active_commitment(merchant, booking_date)
     plan_name = f"{merchant} (€{amount:.2f})"
     next_due = (date.fromisoformat(booking_date) + timedelta(days=30)).isoformat()
 
