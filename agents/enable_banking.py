@@ -238,15 +238,22 @@ async def _tx_save(tx: dict, merchant: str, category_id: str | None) -> None:
 # ── BNPL (buy-now-pay-later) commitments ──────────────────────────────────────
 
 async def _find_active_commitment(merchant: str, amount: float) -> dict | None:
-    """Cerca piano attivo per merchant, con tolleranza ±10% sull'importo rata (evita duplicati per centesimi di differenza)."""
-    body = {"filter": {"property": "Name", "title": {"starts_with": merchant}}, "page_size": 10}
+    """Cerca piano attivo per merchant (case-insensitive — il testo remittance della banca
+    non usa maiuscole/minuscole in modo coerente, es. "Klarna*Ticketone" vs "Klarna*ticketone"),
+    con tolleranza ±10% sull'importo rata (evita duplicati per centesimi di differenza)."""
+    body = {"filter": {"property": "amount_remaining", "number": {"greater_than": 0}}, "page_size": 20}
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.post(
             f"https://api.notion.com/v1/databases/{DB_COMMITMENTS}/query",
             headers=NOTION_HEADERS, json=body,
         )
+    merchant_l = merchant.lower()
     for page in r.json().get("results", []):
         props = page["properties"]
+        name_parts = props.get("Name", {}).get("title", [])
+        name = (name_parts[0]["plain_text"] if name_parts else "").lower()
+        if not name.startswith(merchant_l):
+            continue
         remaining = props.get("amount_remaining", {}).get("number") or 0
         installment = props.get("monthly_installment", {}).get("number") or 0
         if remaining > 0 and installment > 0 and abs(installment - amount) / installment <= 0.10:
