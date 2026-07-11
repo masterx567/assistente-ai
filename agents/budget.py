@@ -775,7 +775,10 @@ async def get_amortization_table() -> str:
         rate_rimaste = round(remaining / installment) if installment else 0
         rate_totali = round(total / installment) if installment else 0
         rata_corrente = rate_totali - rate_rimaste + 1
-        pagate_pct = (rata_corrente - 1) / rate_totali * 100 if rate_totali else 0
+        # % pagato sull'importo reale, non sul conteggio rate — le rate non sono sempre
+        # uguali (es. Klarna: prima rata più alta delle successive), dividere per la rata
+        # corrente falsava il conteggio totale e quindi la barra.
+        pagate_pct = (total - remaining) / total * 100 if total else 0
         lines.append(
             f"• *{name}* (€{installment:.2f}/rata)\n"
             f"   rata {rata_corrente}/{rate_totali} — €{remaining:.2f} rimanenti su €{total:.2f}\n"
