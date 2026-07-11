@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from router import route_message, handle_checklist_toggle, handle_trip_transaction_delete
 from agents.errors import log_error
 from agents.news import get_morning_briefing
-from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies
+from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies, generate_spending_chart
 from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
@@ -86,6 +86,26 @@ def send_telegram(text: str, reply_markup: dict = None):
                 if reply_markup and is_last:
                     plain["reply_markup"] = reply_markup
                 c.post(url, json=plain)
+
+
+def send_telegram_photo(photo_bytes: bytes, caption: str = ""):
+    """Manda una foto (es. grafico spese) con didascalia. Il limite Telegram per la caption
+    è 1024 char: se il testo è più lungo, va come foto senza caption + messaggio testo a parte."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    if len(caption) > 1024:
+        with httpx.Client(timeout=15) as c:
+            c.post(url, data={"chat_id": TELEGRAM_CHAT_ID}, files={"photo": ("chart.png", photo_bytes, "image/png")})
+        send_telegram(caption)
+        return
+    with httpx.Client(timeout=15) as c:
+        r = c.post(
+            url,
+            data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
+            files={"photo": ("chart.png", photo_bytes, "image/png")},
+        )
+        if not r.json().get("ok"):
+            c.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                   files={"photo": ("chart.png", photo_bytes, "image/png")})
 
 
 def transcribe_voice(file_id: str, filename: str = "voice.ogg") -> str | None:
@@ -336,7 +356,11 @@ def tick():
         msg = format_weekly_summary(weekly)
         digest = asyncio.run(get_food_digest(days_back=7))
         msg += format_food_digest(digest)
-        send_telegram(msg)
+        chart = generate_spending_chart(weekly, "Spese ultimi 7 giorni")
+        if chart:
+            send_telegram_photo(chart, msg)
+        else:
+            send_telegram(msg)
         done.append("weekly")
 
         anomalies = asyncio.run(get_spending_anomalies())
@@ -353,7 +377,11 @@ def tick():
         msg = f"📅 *Riepilogo {mese_anno_it(now)}*\n\n" + format_spending_summary(monthly)
         if alerts:
             msg += "\n\n" + format_alerts(alerts)
-        send_telegram(msg)
+        chart = generate_spending_chart(monthly, f"Spese {mese_anno_it(now)}")
+        if chart:
+            send_telegram_photo(chart, msg)
+        else:
+            send_telegram(msg)
         send_telegram("📊 Fine mese: quanto hai su Fineco (patrimonio ETF)? Rispondimi con l'importo per calcolare il patrimonio totale.")
         asyncio.run(save_pending("fineco_balance", {}))
         done.append("monthly")

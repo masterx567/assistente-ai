@@ -1,6 +1,7 @@
 import httpx
 import os
 from datetime import date
+from agents.budget import _bar
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DB_VIAGGI = "db4354c9-938d-4d89-99e8-4047be81b84b"
@@ -177,7 +178,8 @@ def format_checklist(items: list[dict]) -> str:
     if not items:
         return "Nessuna checklist per questo viaggio."
     done = sum(1 for i in items if i["fatto"])
-    return f"🧳 *Checklist* ({done}/{len(items)}) — tocca una voce per spuntarla:"
+    pct = done / len(items) * 100 if items else 0
+    return f"🧳 *Checklist* ({done}/{len(items)})\n{_bar(pct, filled_emoji='🟩')} — tocca una voce per spuntarla:"
 
 
 def checklist_buttons(items: list[dict]) -> dict:

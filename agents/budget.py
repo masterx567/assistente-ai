@@ -13,6 +13,20 @@ def mese_anno_it(d) -> str:
     return f"{_MESI_IT[d.month]} {d.year}"
 
 
+def _bar(pct: float, size: int = 10, filled_emoji: str = "🟦") -> str:
+    """Barra a blocchi emoji: filled_emoji per la parte fatta, ⬜ per il resto.
+    pct è 0-100. Usata per checklist/BNPL dove serve solo 'quanto è pieno'."""
+    filled = max(0, min(size, round(size * pct / 100)))
+    return filled_emoji * filled + "⬜" * (size - filled)
+
+
+def _budget_bar(pct: float, size: int = 10) -> str:
+    """Barra colorata per budget: verde <80%, giallo 80-99%, rosso 100%+."""
+    emoji = "🟩" if pct < 80 else ("🟨" if pct < 100 else "🟥")
+    filled = max(0, min(size, round(size * min(pct, 100) / 100)))
+    return emoji * filled + "⬜" * (size - filled)
+
+
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DB_TRANSACTIONS = os.getenv("NOTION_DB_TRANSACTIONS")
 DB_CATEGORIES = os.getenv("NOTION_DB_CATEGORIES")
@@ -212,6 +226,31 @@ async def get_recent_transactions(limit: int = 10) -> list[dict]:
                 title_parts[0]["plain_text"] if title_parts else "?")
         results.append({"name": name, "amount": abs(amount), "date": date_str})
     return results
+
+
+def generate_spending_chart(spending: dict, title: str) -> bytes | None:
+    """Torta spese per categoria come PNG (bytes). None se non c'è nulla da disegnare."""
+    if not spending:
+        return None
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import io
+
+    cats = sorted(spending.items(), key=lambda x: x[1], reverse=True)
+    labels = [c for c, _ in cats]
+    values = [v for _, v in cats]
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.pie(values, labels=labels, autopct="%1.0f%%", startangle=90)
+    ax.set_title(title)
+    ax.axis("equal")
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
 
 
 def format_weekly_summary(spending: dict) -> str:
@@ -735,9 +774,11 @@ async def get_amortization_table() -> str:
         rate_rimaste = round(remaining / installment) if installment else 0
         rate_totali = round(total / installment) if installment else 0
         rata_corrente = rate_totali - rate_rimaste + 1
+        pagate_pct = (rata_corrente - 1) / rate_totali * 100 if rate_totali else 0
         lines.append(
             f"• *{name}* (€{installment:.2f}/rata)\n"
             f"   rata {rata_corrente}/{rate_totali} — €{remaining:.2f} rimanenti su €{total:.2f}\n"
+            f"   {_bar(pagate_pct)}\n"
             f"   prossima: {due}"
         )
         tot_installment += installment
@@ -787,6 +828,7 @@ def format_alerts(alerts: list[dict]) -> str:
     for a in alerts:
         emoji = "🚨" if a["level"] == "over" else "⚠️"
         lines.append(
-            f"{emoji} *{a['category']}*: €{a['spent']:.0f}/€{a['budget']:.0f} ({a['pct']:.0f}%)"
+            f"{emoji} *{a['category']}*: €{a['spent']:.0f}/€{a['budget']:.0f} ({a['pct']:.0f}%)\n"
+            f"{_budget_bar(a['pct'])}"
         )
     return "\n".join(lines)
