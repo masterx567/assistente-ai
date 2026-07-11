@@ -10,7 +10,7 @@ from agents.calendar import get_events, get_events_in_range, format_events, add_
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
-from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan
+from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan, find_course_by_name
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -261,6 +261,21 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in ["piano esami", "piano studio", "piano di studio", "piano corsi", "i miei esami", "prossimi esami"]):
         courses = await get_full_plan()
         return format_study_plan(courses)
+
+    # Esame/corso segnato completato, dichiarato liberamente (non solo in risposta al prompt del bot)
+    _exam_verb = r"passat[oa]|superat[oa]|fatt[oa]|finit[oa]|completat[oa]"
+    _exam_explicit = _re.search(rf"(?:esame|corso)\s+(.+?)\s+(?:{_exam_verb})\b", text_lower)
+    _exam_bare = _re.match(rf"^(.+?)\s+(?:{_exam_verb})$", text_lower) if not _exam_explicit else None
+    _exam_query = _exam_explicit.group(1).strip() if _exam_explicit else (_exam_bare.group(1).strip() if _exam_bare else None)
+    if _exam_query:
+        course = await find_course_by_name(_exam_query)
+        if course:
+            await mark_course_done(course["id"])
+            next_course = await get_next_course()
+            next_line = format_next_course_line(next_course) if next_course else "\n🎓 Piano di studio completato!"
+            return f"✅ Segnato come completato: *{course['corso']}*.{next_line}"
+        if _exam_explicit:
+            return f"Non ho trovato '{_exam_query}' nel piano di studio."
 
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):

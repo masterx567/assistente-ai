@@ -67,8 +67,18 @@ async def get_full_plan() -> list[dict]:
         name = name_parts[0]["plain_text"] if name_parts else "?"
         fine_iso = (props.get("fine", {}).get("date") or {}).get("start", "")[:10]
         stato = (props.get("stato", {}).get("select") or {}).get("name", "da_fare")
-        courses.append({"corso": name, "fine": fine_iso, "stato": stato})
+        courses.append({"id": page["id"], "corso": name, "fine": fine_iso, "stato": stato})
     return courses
+
+
+async def find_course_by_name(query: str) -> dict | None:
+    """Trova il corso non completato che matcha meglio query (fuzzy, case-insensitive)."""
+    courses = await get_full_plan()
+    query_l = query.lower().strip()
+    for c in courses:
+        if c["stato"] != "completato" and (query_l in c["corso"].lower() or c["corso"].lower() in query_l):
+            return c
+    return None
 
 
 def format_study_plan(courses: list[dict]) -> str:
