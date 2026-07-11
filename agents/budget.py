@@ -232,6 +232,7 @@ def generate_spending_chart(spending: dict, title: str) -> bytes | None:
     """Torta spese per categoria come PNG (bytes). None se non c'è nulla da disegnare."""
     if not spending:
         return None
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")  # su Vercel il filesystem è read-only tranne /tmp
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
