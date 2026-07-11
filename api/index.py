@@ -278,6 +278,22 @@ def webhook():
     return jsonify({"ok": True})
 
 
+@app.route("/api/chart-test")
+def chart_test():
+    """TEMP: verifica che matplotlib generi+mandi un grafico reale su Vercel (filesystem read-only)."""
+    _require_cron_secret()
+    try:
+        monthly = asyncio.run(get_monthly_spending())
+        chart = generate_spending_chart(monthly, "Test grafico su Vercel")
+        if not chart:
+            return jsonify({"ok": False, "error": "nessuna spesa da disegnare"})
+        send_telegram_photo(chart, "🧪 Test grafico da Vercel — se lo vedi, matplotlib funziona in produzione.")
+        return jsonify({"ok": True, "bytes": len(chart)})
+    except Exception as e:
+        import traceback as tb
+        return jsonify({"ok": False, "error": str(e), "trace": tb.format_exc()[-1500:]})
+
+
 @app.route("/api/tick")
 def tick():
     _require_cron_secret()
