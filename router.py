@@ -257,12 +257,9 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in ["patrimonio", "quanto vale il mio patrimonio", "net worth"]):
         return await get_net_worth()
 
-    # Piano di studio completo
-    if any(w in text_lower for w in ["piano esami", "piano studio", "piano di studio", "piano corsi", "i miei esami", "prossimi esami"]):
-        courses = await get_full_plan()
-        return format_study_plan(courses)
-
     # Esame/corso segnato completato, dichiarato liberamente (non solo in risposta al prompt del bot)
+    # — controllato PRIMA del display piano, altrimenti "esame" dentro "esame SQL passato"
+    # farebbe scattare il piano invece del completamento.
     _exam_verb = r"passat[oa]|superat[oa]|fatt[oa]|finit[oa]|completat[oa]"
     _exam_explicit = _re.search(rf"(?:esame|corso)\s+(.+?)\s+(?:{_exam_verb})\b", text_lower)
     _exam_bare = _re.match(rf"^(.+?)\s+(?:{_exam_verb})$", text_lower) if not _exam_explicit else None
@@ -276,6 +273,14 @@ async def route_message(user_text: str) -> str:
             return f"✅ Segnato come completato: *{course['corso']}*.{next_line}"
         if _exam_explicit:
             return f"Non ho trovato '{_exam_query}' nel piano di studio."
+
+    # Piano di studio completo
+    if any(w in text_lower for w in [
+        "piano esami", "piano studio", "piano di studio", "piano corsi",
+        "i miei esami", "prossimi esami", "esame", "esami", "master",
+    ]):
+        courses = await get_full_plan()
+        return format_study_plan(courses)
 
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
