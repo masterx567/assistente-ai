@@ -20,7 +20,6 @@ from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
-from agents.journal import get_streak_days, format_streak_message
 
 app = Flask(__name__)
 
@@ -331,17 +330,8 @@ def tick():
         if reminder_lines:
             parts.append("🔔 *PROMEMORIA*\n\n" + "\n\n".join(reminder_lines))
 
-        days = asyncio.run(get_streak_days())
-        parts.append("🎯 *STREAK*\n\n" + format_streak_message(days))
-
         send_telegram("\n\n━━━━━━━━━━━━━━━\n\n".join(parts))
         done.append("morning9")
-
-    # Incoraggiamento streak dipendenza: 14:00 / 21:00 (09:00 incluso nel blocco sopra)
-    if (h in (14, 21)) and m <= 4 and _once(f"streak:{now.date()}:{h}"):
-        days = asyncio.run(get_streak_days())
-        send_telegram(format_streak_message(days))
-        done.append(f"streak:{days}")
 
     # Budget serale: 20:00 esatto
     if h == 20 and m <= 4 and _once(f"evening:{now.date()}"):

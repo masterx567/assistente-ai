@@ -79,12 +79,6 @@ async def route_message(user_text: str) -> str:
             text_lower = text_lower[len(_p):]
             break
 
-    # Cedimento dipendenza (resetta streak) — controllalo prima del diario generico
-    if "ho ceduto" in text_lower:
-        note_match = _re.search(r"ho ceduto\s*(.*)", text_lower)
-        note = note_match.group(1).strip(" ,.-") if note_match else ""
-        return await add_journal_entry(note or "Cedimento.", cedimento=True)
-
     # Lettura diario: "mostra/rileggi diario <periodo>" oppure "diario di/del <periodo>" (solo periodo, non prosa)
     _period_only_re = _re.compile(
         r"^(di |del |della |questo |questa |ultima |ultimo |per )*"
