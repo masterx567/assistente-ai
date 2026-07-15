@@ -70,6 +70,20 @@ async def route_message(user_text: str) -> str:
             return await get_tonight_sky("valmalenco")
         return await get_tonight_sky()
 
+    if text_lower in ("/help", "aiuto", "cosa sai fare", "cosa puoi fare", "comandi"):
+        return (
+            "🤖 *Cosa so fare*\n\n"
+            "💰 *Finanze*: saldo, budget del mese, spese per categoria, flusso di cassa, "
+            "patrimonio, prestiti, rate BNPL, aggiungi entrata\n\n"
+            "📅 *Calendario*: mostra/aggiungi/elimina/rinomina eventi, cerca un evento\n\n"
+            "✈️ *Viaggi*: /viaggio (crea), /checklist (mostra), budget viaggio, elimina viaggio\n\n"
+            "🎓 *Studio*: piano esami, segna un esame/corso fatto\n\n"
+            "📔 *Diario*: \"diario: ...\" per scrivere, \"diario di luglio\" per rileggere\n\n"
+            "🔭 *Cielo*: /cielo (Cormano), /cielo valmalenco (Alpe Ventina)\n\n"
+            "🔔 *Promemoria*: \"ricordami di...\"\n\n"
+            "/fine annulla qualsiasi flusso in corso."
+        )
+
     # Annaffiato manuale, fuori dal flusso reminder (es. annaffi di tua iniziativa)
     if "annaffi" in text_lower:
         from agents.piante import water_container
