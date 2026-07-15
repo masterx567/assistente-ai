@@ -64,6 +64,12 @@ async def route_message(user_text: str) -> str:
         items = await get_checklist(trip["id"])
         return {"text": format_checklist(items), "markup": checklist_buttons(items)}
 
+    if text_lower.startswith("/cielo"):
+        rest = user_text.strip()[len("/cielo"):].strip().lower()
+        if any(w in rest for w in ["valmalenco", "val malenco", "ventina"]):
+            return await get_tonight_sky("valmalenco")
+        return await get_tonight_sky()
+
     # Annaffiato manuale, fuori dal flusso reminder (es. annaffi di tua iniziativa)
     if "annaffi" in text_lower:
         from agents.piante import water_container
