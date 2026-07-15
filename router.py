@@ -83,7 +83,7 @@ async def route_message(user_text: str) -> str:
             "✈️ *Viaggi*: /viaggio (crea), /checklist (mostra), budget viaggio, elimina viaggio\n\n"
             "🎓 *Studio*: piano esami, segna un esame/corso fatto\n\n"
             "📔 *Diario*: \"diario: ...\" per scrivere, \"diario di luglio\" per rileggere\n\n"
-            "🔭 *Cielo*: /cielo (Cormano), /cielo valmalenco (Alpe Ventina)\n\n"
+            "🔭 *Cielo*: /cielo (Cormano), /cielo valmalenco (Alpe Ventina), \"prossima serata serena\"\n\n"
             "🔔 *Promemoria*: \"ricordami di...\"\n\n"
             "/fine annulla qualsiasi flusso in corso."
         )
