@@ -20,6 +20,7 @@ from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
+from agents.piante import CONTAINERS as PLANT_CONTAINERS, get_all_containers, is_due, build_reminder, water_container, get_weather_adjustment
 
 app = Flask(__name__)
 
@@ -244,6 +245,13 @@ def webhook():
             except Exception as e:
                 result = {"text": f"Errore: {str(e)}"}
             edit_telegram_message(cb_message_id, result["text"], result.get("markup"))
+        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("pw:"):
+            short = cb_data[3:]
+            try:
+                result_text = asyncio.run(water_container(short))
+            except Exception as e:
+                result_text = f"Errore: {str(e)}"
+            edit_telegram_message(cb_message_id, result_text)
         return jsonify({"ok": True})
 
     # Gestione messaggio normale
@@ -386,6 +394,20 @@ def tick():
                 f"⚠️ *Sync banca Isybank fermo* — sessione Enable Banking scaduta ({result['auth_error']}).\n"
                 f"Serve ri-autorizzare l'accesso alla banca."
             )
+
+    # Reminder irrigazione piante: 8:00 e 20:00 (20:00 ripete se non confermato la mattina)
+    if h in (8, 20) and m <= 4:
+        weather = asyncio.run(get_weather_adjustment())
+        oggi = now.date()
+        by_nome = {c["nome"]: c for c in asyncio.run(get_all_containers())}
+        for short, cfg in PLANT_CONTAINERS.items():
+            container = by_nome.get(cfg["nome"])
+            if not container:
+                continue
+            if is_due(container, oggi, h, weather) and _once(f"water:{short}:{now.date()}:{h}"):
+                reminder = build_reminder(short, container, oggi)
+                send_telegram(reminder["text"], reminder["markup"])
+                done.append(f"water:{short}")
 
     # Reminders eventi calendario
     done.extend(_check_reminders(now))

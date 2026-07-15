@@ -63,6 +63,14 @@ async def route_message(user_text: str) -> str:
         items = await get_checklist(trip["id"])
         return {"text": format_checklist(items), "markup": checklist_buttons(items)}
 
+    # Annaffiato manuale, fuori dal flusso reminder (es. annaffi di tua iniziativa)
+    if "annaffi" in text_lower:
+        from agents.piante import water_container
+        if "vaso" in text_lower:
+            return await water_container("v")
+        if "fiorier" in text_lower:
+            return await water_container("f")
+
     # Rimuovi prefissi conversazionali per normalizzare il testo prima del routing
     _conv_prefixes = [
         "mi puoi dire ", "puoi dirmi ", "potresti dirmi ", "potresti dirci ",

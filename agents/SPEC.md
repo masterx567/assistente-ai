@@ -18,6 +18,7 @@ agents/
   reminders.py   promemoria Notion (salta entry PENDING:)
   pending.py     stato temporaneo conferme (stesso DB Reminders, prefix PENDING:)
   errors.py      log errori su BotErrors DB Notion
+  piante.py      reminder irrigazione (fioriera/vaso), mood/streak, meteo Cormano
 ```
 
 ## Notion DB IDs
@@ -28,6 +29,7 @@ agents/
 | MerchantMap | `c82a1f2a-a1dc-421b-aeb8-e0fc4e413354` |
 | Reminders + Pending | `38a9d2a5-23ac-8158-badb-f41c332b13e4` |
 | BotErrors | `38b9d2a5-23ac-81f5-935c-c9b665d4330f` |
+| Irrigazione | `41a6389f8060493f80a2976518fd528c` |
 
 ## Env vars
 ```
@@ -52,6 +54,7 @@ Finestre: `0<=m<=4` (4 min max 1 fire per evento).
 | 20:00 day_before evento | reminder calendario |
 | 2h/1h prima evento | reminder calendario |
 | remind_at<=now, sent=False | promemoria Notion (salta PENDING:) |
+| h==8 o h==20, 0<=m<=4 | reminder irrigazione (se scaduto, meteo-corretto) |
 
 ## Routing (ordine CRITICO — non riordinare)
 1. confirm kw → `handle_confirm()`
