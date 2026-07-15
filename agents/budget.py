@@ -124,6 +124,51 @@ async def get_monthly_spending() -> dict:
     return await _get_spending(now.year, now.month)
 
 
+async def get_monthly_cashflow() -> dict:
+    """Entrate/uscite/netto del mese corrente (a differenza di get_monthly_spending,
+    che filtra solo le uscite per categoria, qui sommiamo tutti i movimenti)."""
+    now = datetime.now()
+    start = f"{now.year}-{now.month:02d}-01"
+    end = f"{now.year}-{now.month:02d}-{_last_day(now.year, now.month):02d}"
+    body = {
+        "filter": {"and": [
+            {"property": "date", "date": {"on_or_after": start}},
+            {"property": "date", "date": {"on_or_before": end}},
+        ]},
+        "page_size": 100,
+    }
+    entrate = 0.0
+    uscite = 0.0
+    cursor = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            if cursor:
+                body["start_cursor"] = cursor
+            r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+            data = r.json()
+            for page in data.get("results", []):
+                amt = page["properties"].get("amount", {}).get("number") or 0
+                if amt > 0:
+                    entrate += amt
+                else:
+                    uscite += amt
+            if not data.get("has_more"):
+                break
+            cursor = data.get("next_cursor")
+    return {"entrate": entrate, "uscite": uscite, "netto": entrate + uscite}
+
+
+def format_monthly_cashflow(flow: dict) -> str:
+    netto = flow["netto"]
+    emoji = "🟢" if netto >= 0 else "🔴"
+    return (
+        f"💰 *Flusso di cassa {mese_anno_it(datetime.now())}*\n\n"
+        f"⬆️ Entrate: €{flow['entrate']:.2f}\n"
+        f"⬇️ Uscite: €{abs(flow['uscite']):.2f}\n"
+        f"{emoji} *Netto: €{netto:+.2f}*"
+    )
+
+
 async def get_budget_alerts() -> list[dict]:
     """Ritorna categorie che hanno superato 80% o 100% del budget."""
     spending = await get_monthly_spending()

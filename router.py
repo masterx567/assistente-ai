@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend, get_monthly_cashflow, format_monthly_cashflow
 import re as _re
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, get_events_in_range, format_events, add_event, add_multiday_event, delete_event_by_title, rename_event, reschedule_event, search_events
@@ -287,6 +287,11 @@ async def route_message(user_text: str) -> str:
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
         return await get_month_projection()
+
+    # Flusso di cassa mensile: entrate/uscite/netto (diverso da patrimonio, che è cumulativo)
+    if any(w in text_lower for w in ["flusso di cassa", "entrate e uscite", "entrate uscite", "quanto ho guadagnato", "quanto ho risparmiato", "bilancio del mese", "bilancio mese", "netto del mese", "cashflow"]):
+        flow = await get_monthly_cashflow()
+        return format_monthly_cashflow(flow)
 
     # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
     _del_trip_match = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio\s*(.*)", text_lower)
