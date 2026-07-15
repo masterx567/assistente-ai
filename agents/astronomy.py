@@ -78,27 +78,42 @@ def _observer(location: str = DEFAULT_LOCATION):
 
 def _time_tonight(hour: int = 22):
     """Istante di stasera (oggi, ora locale) alle `hour`, in tempo skyfield."""
+    return _time_at(0, hour)
+
+
+def _time_at(days_ahead: int, hour: int = 22):
+    """Istante a `days_ahead` giorni da oggi, ora locale, alle `hour`, in tempo skyfield."""
     _, _, ts = _load()
-    now = datetime.now(ROME)
+    now = datetime.now(ROME) + timedelta(days=days_ahead)
     local = now.replace(hour=hour, minute=0, second=0, microsecond=0)
     return ts.from_datetime(local)
 
 
-async def _cloud_cover_tonight(location: str = DEFAULT_LOCATION) -> int | None:
-    """% copertura nuvolosa stasera (slot 21:00), via wttr.in — None se non disponibile."""
+async def _cloud_cover_forecast(location: str = DEFAULT_LOCATION) -> list[dict]:
+    """% copertura nuvolosa (slot 21:00) per i prossimi giorni disponibili da wttr.in (di solito 3)."""
     meteo_query = LOCATIONS[location]["meteo"]
+    out = []
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             r = await client.get(f"https://wttr.in/{meteo_query}?format=j1", headers={"User-Agent": "curl/7.0"})
         if r.status_code != 200:
-            return None
-        day = r.json()["weather"][0]
-        for h in day["hourly"]:
-            if h.get("time") == "2100":
-                return int(h.get("cloudcover", 50))
+            return out
+        for day in r.json().get("weather", []):
+            cloud = None
+            for h in day.get("hourly", []):
+                if h.get("time") == "2100":
+                    cloud = int(h.get("cloudcover", 50))
+            if cloud is not None:
+                out.append({"date": day.get("date"), "cloud": cloud})
     except Exception:
-        return None
-    return None
+        return out
+    return out
+
+
+async def _cloud_cover_tonight(location: str = DEFAULT_LOCATION) -> int | None:
+    """% copertura nuvolosa stasera (slot 21:00), via wttr.in — None se non disponibile."""
+    forecast = await _cloud_cover_forecast(location)
+    return forecast[0]["cloud"] if forecast else None
 
 
 def _moon_phase(t) -> dict:
@@ -208,6 +223,41 @@ async def get_tonight_sky(location: str = DEFAULT_LOCATION) -> str:
     shower = _meteor_shower_today()
     if shower:
         lines.append(f"\n{shower}")
+
+    return "\n".join(lines)
+
+
+async def get_best_night(location: str = DEFAULT_LOCATION) -> str:
+    """Tra i giorni disponibili in previsione (di solito 3), qual è la serata migliore
+    per osservare — utile quando stasera è coperto ma tra 2 giorni potrebbe schiarirsi."""
+    nome = LOCATIONS[location]["nome"]
+    forecast = await _cloud_cover_forecast(location)
+    if not forecast:
+        return "Previsioni meteo non disponibili al momento."
+
+    best = min(forecast, key=lambda d: d["cloud"])
+    idx = forecast.index(best)
+    t = _time_at(idx)
+    moon = _moon_phase(t)
+
+    giorno = "stasera" if idx == 0 else ("domani sera" if idx == 1 else f"tra {idx} giorni ({best['date']})")
+
+    lines = [f"🔭 *Prossima serata migliore da {nome}: {giorno}*\n"]
+    if best["cloud"] < 30:
+        lines.append(f"☀️ {best['cloud']}% nuvole previste — buona finestra di osservazione")
+    elif best["cloud"] < 70:
+        lines.append(f"⛅ {best['cloud']}% nuvole previste — la migliore disponibile, ma incerta")
+    else:
+        lines.append(f"☁️ Anche la migliore serata dei prossimi giorni è coperta ({best['cloud']}% nuvole)")
+    lines.append(f"🌙 {moon['name']} ({moon['illum']:.0f}% illuminata) quella sera")
+
+    others = [d for d in forecast if d is not best]
+    if others:
+        lines.append("\nAltri giorni:")
+        for d in others:
+            i = forecast.index(d)
+            label = "stasera" if i == 0 else ("domani" if i == 1 else f"tra {i}gg")
+            lines.append(f"• {label}: {d['cloud']}% nuvole")
 
     return "\n".join(lines)
 
