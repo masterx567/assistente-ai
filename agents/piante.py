@@ -106,6 +106,22 @@ def is_due(container: dict, oggi: date, hour: int, weather: dict) -> bool:
     return due
 
 
+TIPS = [
+    "annaffia la terra, non le foglie — meno rischio funghi",
+    "se vedi fiorellini spuntare in cima, staccali: il basilico fiorito diventa amaro",
+    "raccogli dall'alto (sopra un nodo di foglie), mai spogliare una pianta intera — si ramifica meglio",
+    "terra secca al tatto 2-3cm sotto la superficie = ha davvero sete, non fidarti solo delle foglie",
+    "troppa acqua è peggio di poca: foglie basse gialle o macchie scure sui fusti = stai esagerando",
+    "pianticine fitte tra loro? sfoltisci man mano che crescono, l'aria deve circolare",
+    "non lasciare acqua ferma nel sottovaso dopo l'annaffiata — le radici marciscono",
+    "giornata molto calda e afosa? un controllo visivo extra non fa male, oltre al reminder",
+]
+
+
+def _pick_tip(oggi: date) -> str:
+    return TIPS[oggi.toordinal() % len(TIPS)]
+
+
 def build_reminder(short: str, container: dict, oggi: date) -> dict:
     ritardo = giorni_ritardo(container, oggi) or 0
     emoji, testo = mood(ritardo)
@@ -114,6 +130,7 @@ def build_reminder(short: str, container: dict, oggi: date) -> dict:
             f"Annaffia fino a che esce dal foro di drenaggio (~{cfg['ml']}).")
     if container["streak"] >= 3:
         text += f"\n🔥 {container['streak']} volte di fila in orario."
+    text += f"\n\n💡 _{_pick_tip(oggi)}_"
     markup = {"inline_keyboard": [[{"text": "✅ Annaffiato", "callback_data": f"pw:{short}"}]]}
     return {"text": text, "markup": markup}
 
