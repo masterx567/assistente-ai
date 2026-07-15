@@ -296,7 +296,8 @@ async def route_message(user_text: str) -> str:
 
     # Cielo stanotte (telescopio): pianeti visibili, fase lunare, meteo
     if any(w in text_lower for w in ["cosa vedo stanotte", "cielo stanotte", "cielo stasera", "cosa vedo stasera", "telescopio", "pianeti visibili", "fase lunare"]):
-        return await get_tonight_sky()
+        location = "valmalenco" if any(w in text_lower for w in ["valmalenco", "ventina", "gerli", "chiareggio"]) else "cormano"
+        return await get_tonight_sky(location)
 
     # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
     _del_trip_match = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio\s*(.*)", text_lower)

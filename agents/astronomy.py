@@ -6,9 +6,13 @@ from zoneinfo import ZoneInfo
 
 ROME = ZoneInfo("Europe/Rome")
 
-# Cormano (Milano nord) — coordinate del comune, non serve l'indirizzo esatto
-# per calcoli astronomici (differenza trascurabile su scala di gradi).
-LAT, LON = 45.5387, 9.1503
+# Località supportate. Coordinate approssimate (comune/valle) — per calcoli
+# astronomici la differenza di qualche km è trascurabile sull'altezza in gradi.
+LOCATIONS = {
+    "cormano": {"lat": 45.5387, "lon": 9.1503, "elev": 150, "nome": "Cormano", "meteo": "Milano"},
+    "valmalenco": {"lat": 46.2960, "lon": 9.7781, "elev": 1965, "nome": "Alpe Ventina (Rifugio Gerli-Porro)", "meteo": "46.2960,9.7781"},
+}
+DEFAULT_LOCATION = "cormano"
 
 # skyfield scarica un file effemeridi (~17MB) al primo uso — su Vercel il
 # filesystem è read-only tranne /tmp, quindi la cache va forzata lì (stesso
@@ -65,25 +69,27 @@ def _load():
     return _loader, _eph, _ts
 
 
-def _observer():
+def _observer(location: str = DEFAULT_LOCATION):
     from skyfield.api import wgs84
     _, eph, _ = _load()
-    return eph["earth"] + wgs84.latlon(LAT, LON)
+    loc = LOCATIONS[location]
+    return eph["earth"] + wgs84.latlon(loc["lat"], loc["lon"], elevation_m=loc.get("elev", 0))
 
 
 def _time_tonight(hour: int = 22):
-    """Istante di stasera (oggi, ora locale Cormano) alle `hour`, in tempo skyfield."""
+    """Istante di stasera (oggi, ora locale) alle `hour`, in tempo skyfield."""
     _, _, ts = _load()
     now = datetime.now(ROME)
     local = now.replace(hour=hour, minute=0, second=0, microsecond=0)
     return ts.from_datetime(local)
 
 
-async def _cloud_cover_tonight() -> int | None:
+async def _cloud_cover_tonight(location: str = DEFAULT_LOCATION) -> int | None:
     """% copertura nuvolosa stasera (slot 21:00), via wttr.in — None se non disponibile."""
+    meteo_query = LOCATIONS[location]["meteo"]
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get("https://wttr.in/Milano?format=j1", headers={"User-Agent": "curl/7.0"})
+            r = await client.get(f"https://wttr.in/{meteo_query}?format=j1", headers={"User-Agent": "curl/7.0"})
         if r.status_code != 200:
             return None
         day = r.json()["weather"][0]
@@ -111,8 +117,8 @@ def _moon_phase(t) -> dict:
     return {"illum": illum, "name": name, "angle": angle}
 
 
-def _visible_planets(t) -> list[dict]:
-    observer = _observer()
+def _visible_planets(t, location: str = DEFAULT_LOCATION) -> list[dict]:
+    observer = _observer(location)
     _, eph, _ = _load()
     out = []
     for name_it, key in _PLANETS_IT.items():
@@ -127,24 +133,24 @@ def _visible_planets(t) -> list[dict]:
     return sorted(out, key=lambda p: -p["alt"])
 
 
-def _moon_distance_km(t) -> float:
-    observer = _observer()
+def _moon_distance_km(t, location: str = DEFAULT_LOCATION) -> float:
+    observer = _observer(location)
     _, eph, _ = _load()
     astrometric = observer.at(t).observe(eph["moon"]).apparent()
     return astrometric.distance().km
 
 
-def _venus_elongation(t) -> float:
-    observer = _observer()
+def _venus_elongation(t, location: str = DEFAULT_LOCATION) -> float:
+    observer = _observer(location)
     _, eph, _ = _load()
     v = observer.at(t).observe(eph["venus"]).apparent()
     s = observer.at(t).observe(eph["sun"]).apparent()
     return v.separation_from(s).degrees
 
 
-def _planet_conjunctions(t) -> list[str]:
+def _planet_conjunctions(t, location: str = DEFAULT_LOCATION) -> list[str]:
     """Coppie di pianeti separati meno di 3° in cielo — evento notevole a occhio nudo/binocolo."""
-    observer = _observer()
+    observer = _observer(location)
     _, eph, _ = _load()
     positions = {}
     for name_it, key in _PLANETS_IT.items():
@@ -169,14 +175,15 @@ def _meteor_shower_today() -> str | None:
 
 # ── API pubblica ──────────────────────────────────────────────────────────────
 
-async def get_tonight_sky() -> str:
-    """Cosa vedere stasera da Cormano con un Mak 90: meteo, fase lunare, pianeti visibili."""
+async def get_tonight_sky(location: str = DEFAULT_LOCATION) -> str:
+    """Cosa vedere stasera con un Mak 90: meteo, fase lunare, pianeti visibili."""
+    nome = LOCATIONS[location]["nome"]
     t = _time_tonight()
-    cloud = await _cloud_cover_tonight()
+    cloud = await _cloud_cover_tonight(location)
     moon = _moon_phase(t)
-    planets = _visible_planets(t)
+    planets = _visible_planets(t, location)
 
-    lines = ["🔭 *Cielo stasera da Cormano*\n"]
+    lines = [f"🔭 *Cielo stasera da {nome}*\n"]
 
     if cloud is not None:
         if cloud < 30:
@@ -205,10 +212,10 @@ async def get_tonight_sky() -> str:
     return "\n".join(lines)
 
 
-async def check_exceptional_events() -> str | None:
+async def check_exceptional_events(location: str = DEFAULT_LOCATION) -> str | None:
     """Controllo proattivo (1x/giorno): ritorna un messaggio SOLO se c'è un evento
     notevole stanotte E il cielo è sereno — altrimenti None (nessun avviso)."""
-    cloud = await _cloud_cover_tonight()
+    cloud = await _cloud_cover_tonight(location)
     if cloud is None or cloud >= 30:
         return None
 
@@ -223,15 +230,15 @@ async def check_exceptional_events() -> str | None:
     if moon["illum"] < 2:
         events.append("🌑 Luna nuova stanotte — cielo scuro, momento migliore per il deep-sky")
     elif moon["illum"] > 98:
-        dist = _moon_distance_km(t)
+        dist = _moon_distance_km(t, location)
         if dist < 362000:
             events.append(f"🌕 Superluna stanotte (distanza {dist:.0f}km, piena vicino al perigeo)")
 
-    elong = _venus_elongation(t)
+    elong = _venus_elongation(t, location)
     if elong > 44:
         events.append(f"✨ Venere alla massima elongazione ({elong:.1f}°) — massima visibilità")
 
-    events.extend(f"🪐 {c}" for c in _planet_conjunctions(t))
+    events.extend(f"🪐 {c}" for c in _planet_conjunctions(t, location))
 
     if not events:
         return None
