@@ -191,10 +191,10 @@ async def get_tonight_sky() -> str:
     lines.append("")
 
     if planets:
-        lines.append("🪐 *Pianeti — cosa vale la pena col Mak 90 stasera:*")
+        lines.append("🪐 *Pianeti stasera:*")
         for p in planets:
-            quota = "buona quota" if p["buona_quota"] else "basso, aspettati turbolenza"
-            lines.append(f"  • *{p['nome']}* — {p['alt']}° ({quota})\n    {p['nota']}")
+            quota = "buona quota" if p["buona_quota"] else "basso sull'orizzonte, turbolenza"
+            lines.append(f"• *{p['nome']}* ({p['alt']}°, {quota}) — {p['nota']}")
     else:
         lines.append("Nessun pianeta a quota utile stasera per il Mak 90.")
 
