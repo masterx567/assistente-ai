@@ -294,10 +294,13 @@ async def route_message(user_text: str) -> str:
         flow = await get_monthly_cashflow()
         return format_monthly_cashflow(flow)
 
-    # Cielo stanotte (telescopio): pianeti visibili, fase lunare, meteo
+    # Cielo Val Malenco (telescopio in trasferta): comando dedicato, solo su richiesta esplicita
+    if any(w in text_lower for w in ["cielo valmalenco", "cielo val malenco", "cielo ventina"]):
+        return await get_tonight_sky("valmalenco")
+
+    # Cielo stanotte (telescopio, Cormano di default): pianeti visibili, fase lunare, meteo
     if any(w in text_lower for w in ["cosa vedo stanotte", "cielo stanotte", "cielo stasera", "cosa vedo stasera", "telescopio", "pianeti visibili", "fase lunare"]):
-        location = "valmalenco" if any(w in text_lower for w in ["valmalenco", "ventina", "gerli", "chiareggio"]) else "cormano"
-        return await get_tonight_sky(location)
+        return await get_tonight_sky()
 
     # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
     _del_trip_match = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio\s*(.*)", text_lower)
