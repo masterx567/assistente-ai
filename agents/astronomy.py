@@ -24,6 +24,17 @@ _PLANETS_IT = {
     "Saturno": "saturn barycenter",
 }
 
+# Soglia minima altezza (gradi) e nota pratica per un Mak 90 (90mm, f/13-14, ~1250mm focale):
+# a bassa quota la turbolenza atmosferica vanifica la risoluzione di un rifrattore/Mak,
+# quindi la soglia "tecnicamente sopra l'orizzonte" (10°) non basta per capire se ha senso puntarlo.
+_PLANET_INFO = {
+    "Mercurio": {"min_alt": 20, "note": "difficile anche con cielo terso, solo la fase (a spicchio)"},
+    "Venere": {"min_alt": 10, "note": "solo fase (a spicchio), nessun dettaglio di superficie visibile"},
+    "Marte": {"min_alt": 15, "note": "dettagli solo vicino all'opposizione, altrimenti disco piccolo"},
+    "Giove": {"min_alt": 10, "note": "bande nuvolose e 4 lune galileiane visibili, prova 80-120x"},
+    "Saturno": {"min_alt": 10, "note": "anelli ben visibili, prova 100-150x"},
+}
+
 # Piogge di stelle cadenti: date di picco fisse ogni anno (legate alla posizione
 # orbitale terrestre, non cambiano da un anno all'altro se non di ±1 giorno).
 METEOR_SHOWERS = [
@@ -107,8 +118,12 @@ def _visible_planets(t) -> list[dict]:
     for name_it, key in _PLANETS_IT.items():
         astrometric = observer.at(t).observe(eph[key]).apparent()
         alt, az, _ = astrometric.altaz()
-        if alt.degrees > 10:
-            out.append({"nome": name_it, "alt": round(alt.degrees), "az": round(az.degrees)})
+        info = _PLANET_INFO[name_it]
+        if alt.degrees > info["min_alt"]:
+            out.append({
+                "nome": name_it, "alt": round(alt.degrees), "az": round(az.degrees),
+                "nota": info["note"], "buona_quota": alt.degrees >= 30,
+            })
     return sorted(out, key=lambda p: -p["alt"])
 
 
@@ -176,11 +191,12 @@ async def get_tonight_sky() -> str:
     lines.append("")
 
     if planets:
-        lines.append("🪐 *Pianeti visibili stasera (sopra 10° orizzonte):*")
+        lines.append("🪐 *Pianeti — cosa vale la pena col Mak 90 stasera:*")
         for p in planets:
-            lines.append(f"  • {p['nome']} — {p['alt']}° sull'orizzonte")
+            quota = "buona quota" if p["buona_quota"] else "basso, aspettati turbolenza"
+            lines.append(f"  • *{p['nome']}* — {p['alt']}° ({quota})\n    {p['nota']}")
     else:
-        lines.append("Nessun pianeta ben visibile stasera sopra l'orizzonte.")
+        lines.append("Nessun pianeta a quota utile stasera per il Mak 90.")
 
     shower = _meteor_shower_today()
     if shower:
