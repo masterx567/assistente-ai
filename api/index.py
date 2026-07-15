@@ -409,6 +409,14 @@ def tick():
                 send_telegram(reminder["text"], reminder["markup"])
                 done.append(f"water:{short}")
 
+    # Evento astronomico eccezionale stanotte (solo se cielo sereno): 1x/giorno, ore 18
+    if h == 18 and m <= 4 and _once(f"astro:{now.date()}"):
+        from agents.astronomy import check_exceptional_events
+        alert = asyncio.run(check_exceptional_events())
+        if alert:
+            send_telegram(alert)
+            done.append("astro_event")
+
     # Reminders eventi calendario
     done.extend(_check_reminders(now))
 

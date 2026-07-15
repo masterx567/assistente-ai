@@ -7,3 +7,4 @@ __pycache__/
 .vercel
 screen/
 .feature_suggestions.log
+*.bsp

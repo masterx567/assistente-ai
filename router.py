@@ -12,6 +12,7 @@ from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan, find_course_by_name
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
+from agents.astronomy import get_tonight_sky
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -292,6 +293,10 @@ async def route_message(user_text: str) -> str:
     if any(w in text_lower for w in ["flusso di cassa", "entrate e uscite", "entrate uscite", "quanto ho guadagnato", "quanto ho risparmiato", "bilancio del mese", "bilancio mese", "netto del mese", "cashflow"]):
         flow = await get_monthly_cashflow()
         return format_monthly_cashflow(flow)
+
+    # Cielo stanotte (telescopio): pianeti visibili, fase lunare, meteo
+    if any(w in text_lower for w in ["cosa vedo stanotte", "cielo stanotte", "cielo stasera", "cosa vedo stasera", "telescopio", "pianeti visibili", "fase lunare"]):
+        return await get_tonight_sky()
 
     # Elimina viaggio (controlla PRIMA di "elimina" generico calendario)
     _del_trip_match = _re.search(r"elimina(?:mi)?\s+(?:il\s+)?viaggio\s*(.*)", text_lower)
