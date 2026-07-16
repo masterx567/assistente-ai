@@ -19,6 +19,7 @@ agents/
   pending.py     stato temporaneo conferme (stesso DB Reminders, prefix PENDING:)
   errors.py      log errori su BotErrors DB Notion
   piante.py      reminder irrigazione (fioriera/vaso), mood/streak, meteo Cormano
+  gamification.py  check-in palestra/camminata, xp/livelli/leghe, loot creature, streak settimanale, scudi
 ```
 
 ## Notion DB IDs
@@ -30,6 +31,8 @@ agents/
 | Reminders + Pending | `38a9d2a5-23ac-8158-badb-f41c332b13e4` |
 | BotErrors | `38b9d2a5-23ac-81f5-935c-c9b665d4330f` |
 | Irrigazione | `41a6389f8060493f80a2976518fd528c` |
+| GymGame (stato: xp/livello/streak/scudi/creature/badge, riga singola) | `ba636571a56e404e927c2b0197506963` |
+| GymCheckins (log check-in) | `fcc6c148fae142a9b142f9c95331d328` |
 
 ## Env vars
 ```
@@ -55,6 +58,9 @@ Finestre: `0<=m<=4` (4 min max 1 fire per evento).
 | 2h/1h prima evento | reminder calendario |
 | remind_at<=now, sent=False | promemoria Notion (salta PENDING:) |
 | h==8 o h==20, 0<=m<=4 | reminder irrigazione (se scaduto, meteo-corretto) |
+| domenica h==21, 0<=m<=4 | valuta settimana palestra (target 3 check-in), offre scudo se fallita |
+| lunedì h==23, 0<=m<=4 | fallback: applica penalità palestra se scudo non usato entro deadline |
+| venerdì h==20, 0<=m<=4 | nudge palestra se sei a 1-2/3 questa settimana |
 
 ## Routing (ordine CRITICO — non riordinare)
 1. confirm kw → `handle_confirm()`
@@ -82,6 +88,14 @@ Finestre: `0<=m<=4` (4 min max 1 fire per evento).
 4. click bottone → `handle_category_callback(index)` → aggiorna pending → nuova conferma
 
 **Flusso entrata**: stesso pattern con `save_pending("add_income", {...})` → `add_income(source, amount, date)`
+
+## Flusso gamification palestra
+Router: `"stato palestra"` (scheda) controllato PRIMA di `"palestra"`/`"camminata"` (check-in), stesso blocco di `"annaffi"` in cima al router, prima dello strip prefissi conversazionali.
+
+- Check-in (1x/giorno, idempotente via query su GymCheckins): +10xp, roll rarità (60/25/10/4/1% comune/rara/epica/leggendaria/divinità su pool 50 creature), duplicato → +5/+15/+30/+60/+120xp invece della creatura.
+- Livelli: progressivo `100+(N-1)*20` xp/livello, leghe a blocchi di 5 livelli (Bronzo→Leggenda). Delevel possibile se l'xp scende sotto la soglia del livello (`_apply_xp_delta` gestisce salita/discesa a cascata).
+- Target settimanale 3 check-in, valutato domenica 21:00 (`evaluate_week`): fallito + scudi>0 → bottone `gs:shield` (PenaltyPending=True, non applica subito); non cliccato entro lunedì 23:59 → fallback applica -15xp e azzera streak (`apply_pending_penalty_fallback`); scudi guadagnati +1 ogni 5 livelli, max 3.
+- `StreakBrokenRecently` (checkbox) fa comparire un messaggio di rientro non punitivo al check-in successivo a una settimana fallita, poi si resetta. Nessun reward materiale nel rientro (evita l'incentivo perverso a fallire apposta per il bonus).
 
 ## Bug noti / fix applicati
 - `*` in merchant rompeva Markdown → retry senza `parse_mode`

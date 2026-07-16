@@ -21,6 +21,7 @@ from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.piante import CONTAINERS as PLANT_CONTAINERS, get_all_containers, is_due, build_reminder, water_container, get_weather_adjustment
+from agents.gamification import evaluate_week, apply_pending_penalty_fallback, friday_nudge, use_shield
 
 app = Flask(__name__)
 
@@ -252,6 +253,12 @@ def webhook():
             except Exception as e:
                 result_text = f"Errore: {str(e)}"
             edit_telegram_message(cb_message_id, result_text)
+        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data == "gs:shield":
+            try:
+                result_text = asyncio.run(use_shield())
+            except Exception as e:
+                result_text = f"Errore: {str(e)}"
+            edit_telegram_message(cb_message_id, result_text)
         return jsonify({"ok": True})
 
     # Gestione messaggio normale
@@ -408,6 +415,27 @@ def tick():
                 reminder = build_reminder(short, container, oggi)
                 send_telegram(reminder["text"], reminder["markup"])
                 done.append(f"water:{short}")
+
+    # Gamification palestra: valutazione settimanale, domenica 21:00
+    if now.weekday() == 6 and h == 21 and m <= 4 and _once(f"gym_week:{now.date()}"):
+        result = asyncio.run(evaluate_week())
+        if result:
+            send_telegram(result["text"], result.get("markup"))
+        done.append("gym_week")
+
+    # Gamification palestra: fallback penalità se lo scudo non è stato usato entro lunedì 23:59
+    if now.weekday() == 0 and h == 23 and m <= 4 and _once(f"gym_penalty_fallback:{now.date()}"):
+        result = asyncio.run(apply_pending_penalty_fallback())
+        if result:
+            send_telegram(result["text"])
+        done.append("gym_penalty_fallback")
+
+    # Gamification palestra: nudge venerdì 20:00 se sei a 1-2/3 questa settimana
+    if now.weekday() == 4 and h == 20 and m <= 4 and _once(f"gym_nudge:{now.date()}"):
+        nudge = asyncio.run(friday_nudge())
+        if nudge:
+            send_telegram(nudge)
+        done.append("gym_nudge")
 
     # Evento astronomico eccezionale stanotte (solo se cielo sereno): 1x/giorno, ore 18
     if h == 18 and m <= 4 and _once(f"astro:{now.date()}"):

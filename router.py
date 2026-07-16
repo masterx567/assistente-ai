@@ -84,6 +84,7 @@ async def route_message(user_text: str) -> str:
             "🎓 *Studio*: piano esami, segna un esame/corso fatto\n\n"
             "📔 *Diario*: \"diario: ...\" per scrivere, \"diario di luglio\" per rileggere\n\n"
             "🔭 *Cielo*: /cielo (Cormano), /cielo valmalenco (Alpe Ventina), \"prossima serata serena\"\n\n"
+            "🏋️ *Palestra*: \"palestra\" o \"camminata\" per check-in, \"stato palestra\" per la scheda completa\n\n"
             "🔔 *Promemoria*: \"ricordami di...\"\n\n"
             "/fine annulla qualsiasi flusso in corso."
         )
@@ -95,6 +96,18 @@ async def route_message(user_text: str) -> str:
             return await water_container("v")
         if "fiorier" in text_lower:
             return await water_container("f")
+
+    # Gamification palestra/camminata: "stato palestra" PRIMA di "palestra" da sola,
+    # altrimenti il check-in scatterebbe anche quando chiedi solo lo stato
+    if "stato palestra" in text_lower:
+        from agents.gamification import get_status
+        return await get_status()
+    if "palestra" in text_lower:
+        from agents.gamification import checkin
+        return await checkin("palestra")
+    if "camminata" in text_lower:
+        from agents.gamification import checkin
+        return await checkin("camminata")
 
     # Rimuovi prefissi conversazionali per normalizzare il testo prima del routing
     _conv_prefixes = [
