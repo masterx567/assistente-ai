@@ -12,6 +12,7 @@ from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan, find_course_by_name
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
+from agents.piante import water_container, status_report
 from agents.astronomy import get_tonight_sky, get_best_night
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -64,6 +65,9 @@ async def route_message(user_text: str) -> str:
         items = await get_checklist(trip["id"])
         return {"text": format_checklist(items), "markup": checklist_buttons(items)}
 
+    if text_lower == "/piante":
+        return await status_report()
+
     if any(w in text_lower for w in ["prossima serata serena", "prossima serata buona", "quando è sereno", "quando e sereno", "migliore serata"]):
         location = "valmalenco" if any(w in text_lower for w in ["valmalenco", "val malenco", "ventina"]) else "cormano"
         return await get_best_night(location)
@@ -85,17 +89,22 @@ async def route_message(user_text: str) -> str:
             "📔 *Diario*: \"diario: ...\" per scrivere, \"diario di luglio\" per rileggere\n\n"
             "🔭 *Cielo*: /cielo (Cormano), /cielo valmalenco (Alpe Ventina), \"prossima serata serena\"\n\n"
             "🏋️ *Palestra*: \"palestra\" o \"camminata\" per check-in, \"stato palestra\" per la scheda completa\n\n"
+            "🌱 *Piante*: /piante (stato), \"annaffiato fioriera/vaso\" per confermare\n\n"
             "🔔 *Promemoria*: \"ricordami di...\"\n\n"
             "/fine annulla qualsiasi flusso in corso."
         )
 
     # Annaffiato manuale, fuori dal flusso reminder (es. annaffi di tua iniziativa)
     if "annaffi" in text_lower:
-        from agents.piante import water_container
         if "vaso" in text_lower:
             return await water_container("v")
         if "fiorier" in text_lower:
             return await water_container("f")
+
+    # Stato piante on-demand (senza aspettare il reminder)
+    if text_lower == "piante" or any(kw in text_lower for kw in
+            ("stanno le piante", "stato piante", "stato delle piante", "come sta il basilico")):
+        return await status_report()
 
     # Gamification palestra/camminata: "stato palestra" PRIMA di "palestra" da sola,
     # altrimenti il check-in scatterebbe anche quando chiedi solo lo stato

@@ -135,6 +135,22 @@ def build_reminder(short: str, container: dict, oggi: date) -> dict:
     return {"text": text, "markup": markup}
 
 
+async def status_report() -> str:
+    oggi = datetime.now(ROME).date()
+    containers = await get_all_containers()
+    lines = ["🌱 *Stato piante*"]
+    for c in containers:
+        if c["ultimo"] is None:
+            lines.append(f"\n⚪ *{c['nome']}* ({c['piante']}): non ancora avviato")
+            continue
+        ritardo = giorni_ritardo(c, oggi)
+        emoji, testo = mood(ritardo)
+        giorni_fa = (oggi - c["ultimo"]).days
+        lines.append(f"\n{emoji} *{c['nome']}* ({c['piante']}): {testo}\n"
+                     f"ultima annaffiata {giorni_fa}gg fa ({c['ultimo'].strftime('%d/%m')}) · streak {c['streak']}")
+    return "\n".join(lines)
+
+
 async def water_container(short: str) -> str:
     cfg = CONTAINERS.get(short)
     if not cfg:
