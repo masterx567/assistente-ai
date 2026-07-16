@@ -9,7 +9,7 @@
 
 ## File principali
 ```
-api/index.py     webhook Telegram, tick cron, send_telegram, transcribe_voice
+api/index.py     webhook Telegram, tick cron, send_telegram, transcribe_voice, /api/gym-webhook (check-in Shortcuts)
 router.py        routing msg → handler + prefissi conversazionali stripped
 agents/
   budget.py      transazioni, categorie, budget alert, confronto mese, entrate, spese per periodo
@@ -41,6 +41,7 @@ NOTION_TOKEN  NOTION_DB_TRANSACTIONS  NOTION_DB_CATEGORIES
 GROQ_API_KEY
 GOOGLE_CLIENT_ID  GOOGLE_CLIENT_SECRET  GOOGLE_REFRESH_TOKEN
 GOOGLE_CALENDAR_ICAL_URL
+GYM_WEBHOOK_SECRET   # POST /api/gym-webhook (check-in automatico da Apple Shortcuts)
 ```
 
 ## Cron
@@ -96,6 +97,8 @@ Router: `"stato palestra"` (scheda) controllato PRIMA di `"palestra"`/`"camminat
 - Livelli: progressivo `100+(N-1)*20` xp/livello, leghe a blocchi di 5 livelli (Bronzo→Leggenda). Delevel possibile se l'xp scende sotto la soglia del livello (`_apply_xp_delta` gestisce salita/discesa a cascata).
 - Target settimanale 3 check-in, valutato domenica 21:00 (`evaluate_week`): fallito + scudi>0 → bottone `gs:shield` (PenaltyPending=True, non applica subito); non cliccato entro lunedì 23:59 → fallback applica -15xp e azzera streak (`apply_pending_penalty_fallback`); scudi guadagnati +1 ogni 5 livelli, max 3.
 - `StreakBrokenRecently` (checkbox) fa comparire un messaggio di rientro non punitivo al check-in successivo a una settimana fallita, poi si resetta. Nessun reward materiale nel rientro (evita l'incentivo perverso a fallire apposta per il bonus).
+
+**Check-in automatico (anti-bugia)**: `POST /api/gym-webhook?secret=GYM_WEBHOOK_SECRET`, body `{"tipo":"palestra"|"camminata","minuti":N,"data":"YYYY-MM-DD"}`. Pensato per uno Shortcut Apple triggerato da "fine allenamento" in Salute (HealthKit), che manda dati reali invece di fidarsi del testo scritto in chat. Validazione server: `data` deve essere oggi, `camminata` richiede `minuti>=30`. Il check-in effettivo passa dalla stessa `checkin()` usata dal routing testuale (idempotente 1x/giorno).
 
 ## Bug noti / fix applicati
 - `*` in merchant rompeva Markdown → retry senza `parse_mode`

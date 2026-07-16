@@ -21,7 +21,7 @@ from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.piante import CONTAINERS as PLANT_CONTAINERS, get_all_containers, is_due, build_reminder, water_container, get_weather_adjustment
-from agents.gamification import evaluate_week, apply_pending_penalty_fallback, friday_nudge, use_shield
+from agents.gamification import evaluate_week, apply_pending_penalty_fallback, friday_nudge, use_shield, checkin
 
 app = Flask(__name__)
 
@@ -33,6 +33,7 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
 CRON_SECRET = os.getenv("CRON_SECRET")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+GYM_WEBHOOK_SECRET = os.getenv("GYM_WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
@@ -289,6 +290,40 @@ def webhook():
         else:
             send_telegram(reply)
 
+    return jsonify({"ok": True})
+
+
+@app.route("/api/gym-webhook", methods=["POST"])
+def gym_webhook():
+    """Check-in automatico da Apple Shortcuts (trigger su fine allenamento in Salute).
+    Body JSON: {"tipo": "palestra"|"camminata", "minuti": number, "data": "YYYY-MM-DD"}."""
+    provided = request.args.get("secret") or \
+        request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not GYM_WEBHOOK_SECRET or provided != GYM_WEBHOOK_SECRET:
+        return jsonify({"ok": False}), 403
+
+    data = request.get_json(silent=True) or {}
+    tipo = str(data.get("tipo", "")).strip().lower()
+    if tipo not in ("palestra", "camminata"):
+        return jsonify({"ok": False, "error": "tipo deve essere 'palestra' o 'camminata'"}), 400
+
+    try:
+        minuti = float(data.get("minuti", 0) or 0)
+    except (TypeError, ValueError):
+        minuti = 0
+
+    try:
+        workout_date = datetime.strptime(str(data.get("data", "")), "%Y-%m-%d").date()
+    except ValueError:
+        workout_date = datetime.now(ROME).date()
+
+    if workout_date != datetime.now(ROME).date():
+        return jsonify({"ok": False, "error": "l'allenamento non è di oggi"}), 400
+    if tipo == "camminata" and minuti < 30:
+        return jsonify({"ok": False, "error": "camminata sotto i 30 minuti, non valida"}), 400
+
+    result = asyncio.run(checkin(tipo))
+    send_telegram(result["text"], result.get("markup"))
     return jsonify({"ok": True})
 
 
