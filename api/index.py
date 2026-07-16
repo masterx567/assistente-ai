@@ -299,38 +299,41 @@ GYM_WALK_KEYWORDS = ("cammin", "walk", "hik", "escursion", "trekking")
 
 @app.route("/api/gym-webhook", methods=["POST"])
 def gym_webhook():
-    """Check-in automatico da Apple Shortcuts (trigger su inizio/fine allenamento in Salute).
-    Body JSON: {"tipo": <tipo allenamento grezzo>, "minuti": number, "data": "YYYY-MM-DD"}.
-    Richiede >=30 min per contare. Il trigger scatta 2x per allenamento (inizio+fine):
-    innocuo, checkin() e' gia' idempotente 1x/giorno."""
+    """Check-in automatico da Health Auto Export (automazione REST API su nuovo allenamento).
+    Body JSON: {"data": {"workouts": [{"name":..., "start":"yyyy-MM-dd HH:mm:ss Z", "duration": secondi, ...}]}}.
+    Prende l'ultimo allenamento dell'array, richiede >=30 min e che sia di oggi.
+    L'app puo' richiamare l'automazione piu' volte/con piu' allenamenti: checkin() e' gia'
+    idempotente 1x/giorno quindi eventuali doppioni sono innocui."""
     provided = request.args.get("secret") or \
         request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not GYM_WEBHOOK_SECRET or provided != GYM_WEBHOOK_SECRET:
         return jsonify({"ok": False}), 403
 
-    data = request.get_json(silent=True) or {}
-    tipo_raw = str(data.get("tipo", "")).strip().lower()
-    tipo = "camminata" if any(k in tipo_raw for k in GYM_WALK_KEYWORDS) else "palestra"
+    body = request.get_json(silent=True) or {}
+    workouts = (body.get("data") or {}).get("workouts") or []
+    if not workouts:
+        log_error("gym-webhook: nessun allenamento nel payload", f"body grezzo: {body}", "")
+        return jsonify({"ok": False, "error": "nessun allenamento nel payload"}), 400
+    workout = workouts[-1]
 
-    minuti_raw = data.get("minuti", 0)
+    name_raw = str(workout.get("name", "")).strip().lower()
+    tipo = "camminata" if any(k in name_raw for k in GYM_WALK_KEYWORDS) else "palestra"
+
     try:
-        minuti = float(minuti_raw)
+        minuti = float(workout.get("duration", 0) or 0) / 60
     except (TypeError, ValueError):
-        import re as _re
-        match = _re.search(r"[\d.]+", str(minuti_raw))
-        minuti = float(match.group()) if match else 0
+        minuti = 0
 
-    data_raw = data.get("data", "")
     try:
-        workout_date = datetime.strptime(str(data_raw)[:10], "%Y-%m-%d").date()
+        workout_date = datetime.strptime(str(workout.get("start", ""))[:10], "%Y-%m-%d").date()
     except ValueError:
         workout_date = datetime.now(ROME).date()
 
     if workout_date != datetime.now(ROME).date():
-        log_error("gym-webhook: data non odierna", f"body grezzo: {data}", "")
+        log_error("gym-webhook: data non odierna", f"workout: {workout}", "")
         return jsonify({"ok": False, "error": "l'allenamento non è di oggi"}), 400
     if minuti < 30:
-        log_error("gym-webhook: sotto 30min", f"body grezzo: {data} (minuti_raw={minuti_raw!r} -> parsed={minuti})", "")
+        log_error("gym-webhook: sotto 30min", f"workout: {workout} (minuti={minuti})", "")
         return jsonify({"ok": False, "error": "allenamento sotto i 30 minuti, non valido"}), 400
 
     try:
