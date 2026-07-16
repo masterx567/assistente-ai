@@ -21,7 +21,8 @@ from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.piante import CONTAINERS as PLANT_CONTAINERS, get_all_containers, is_due, build_reminder, water_container, get_weather_adjustment
-from agents.gamification import evaluate_week, apply_pending_penalty_fallback, friday_nudge, use_shield, checkin
+from agents.gamification import evaluate_week, apply_pending_penalty_fallback, friday_nudge, use_shield, checkin, get_public_status
+from agents.astronomy import get_sky_status_json
 
 app = Flask(__name__)
 
@@ -343,6 +344,29 @@ def gym_webhook():
         return jsonify({"ok": False, "error": "errore interno"}), 500
     send_telegram(result["text"], result.get("markup"))
     return jsonify({"ok": True})
+
+
+PORTFOLIO_ORIGIN = "https://daniele-acunzo.vercel.app"
+
+
+@app.route("/api/portfolio-status")
+def portfolio_status():
+    """Endpoint pubblico read-only per il widget 'in diretta' del portfolio.
+    Espone solo dati non sensibili (cielo, gamification palestra) — niente finanze,
+    niente contenuti personali. Nessun secret richiesto: e' pensato per essere
+    letto direttamente dal browser del portfolio."""
+    try:
+        sky = asyncio.run(get_sky_status_json())
+    except Exception:
+        sky = None
+    try:
+        gym = asyncio.run(get_public_status())
+    except Exception:
+        gym = None
+    resp = jsonify({"sky": sky, "gym": gym})
+    resp.headers["Access-Control-Allow-Origin"] = PORTFOLIO_ORIGIN
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
 
 
 @app.route("/api/tick")

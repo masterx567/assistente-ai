@@ -293,3 +293,24 @@ async def check_exceptional_events(location: str = DEFAULT_LOCATION) -> str | No
     if not events:
         return None
     return "🔭 *Evento astronomico stanotte* (cielo sereno)\n\n" + "\n".join(events)
+
+
+async def get_sky_status_json(location: str = DEFAULT_LOCATION) -> dict:
+    """Stato cielo in formato JSON, per consumo esterno (es. widget portfolio pubblico).
+    Nessun dato sensibile: solo meteo/astronomia, calcolati con le stesse funzioni
+    usate per il bot."""
+    nome = LOCATIONS[location]["nome"]
+    t = _time_tonight()
+    cloud = await _cloud_cover_tonight(location)
+    moon = _moon_phase(t)
+    planets = _visible_planets(t, location)
+    best = planets[0] if planets else None
+    return {
+        "luogo": nome,
+        "copertura_nuvole_pct": cloud,
+        "sereno": (cloud is not None and cloud < 30),
+        "fase_lunare": moon["name"],
+        "illuminazione_luna_pct": round(moon["illum"]),
+        "pianeta_migliore": best["nome"] if best else None,
+        "altezza_gradi": best["alt"] if best else None,
+    }

@@ -370,3 +370,18 @@ async def friday_nudge() -> str | None:
         plurale = "no" if mancano > 1 else ""
         return f"💪 Sei a {count}/{WEEKLY_TARGET} questa settimana — te ne manca{plurale} {mancano} per l'obiettivo. Weekend buono per recuperare."
     return None
+
+
+async def get_public_status() -> dict:
+    """Sottoinsieme non sensibile dello stato gamification, per consumo esterno
+    (es. widget portfolio pubblico). Niente creature/badge/dettagli interni."""
+    state = await _get_state()
+    oggi = datetime.now(ROME).date()
+    checkins_settimana = len(await _week_checkins(_week_start(oggi)))
+    return {
+        "livello": state["livello"],
+        "lega": league_for_level(state["livello"]),
+        "streak_settimane": state["streak"],
+        "checkin_questa_settimana": checkins_settimana,
+        "obiettivo_settimanale": WEEKLY_TARGET,
+    }
