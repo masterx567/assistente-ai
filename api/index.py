@@ -293,19 +293,23 @@ def webhook():
     return jsonify({"ok": True})
 
 
+GYM_WALK_KEYWORDS = ("cammin", "walk", "hik", "escursion", "trekking")
+
+
 @app.route("/api/gym-webhook", methods=["POST"])
 def gym_webhook():
     """Check-in automatico da Apple Shortcuts (trigger su fine allenamento in Salute).
-    Body JSON: {"tipo": "palestra"|"camminata", "minuti": number, "data": "YYYY-MM-DD"}."""
+    Body JSON: {"tipo": <tipo allenamento grezzo di Salute>, "minuti": number, "data": "YYYY-MM-DD"}.
+    Qualsiasi allenamento >=30 min conta; "tipo" grezzo viene mappato a camminata/palestra qui,
+    niente logica di classificazione richiesta lato Shortcut."""
     provided = request.args.get("secret") or \
         request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not GYM_WEBHOOK_SECRET or provided != GYM_WEBHOOK_SECRET:
         return jsonify({"ok": False}), 403
 
     data = request.get_json(silent=True) or {}
-    tipo = str(data.get("tipo", "")).strip().lower()
-    if tipo not in ("palestra", "camminata"):
-        return jsonify({"ok": False, "error": "tipo deve essere 'palestra' o 'camminata'"}), 400
+    tipo_raw = str(data.get("tipo", "")).strip().lower()
+    tipo = "camminata" if any(k in tipo_raw for k in GYM_WALK_KEYWORDS) else "palestra"
 
     try:
         minuti = float(data.get("minuti", 0) or 0)
@@ -319,10 +323,15 @@ def gym_webhook():
 
     if workout_date != datetime.now(ROME).date():
         return jsonify({"ok": False, "error": "l'allenamento non è di oggi"}), 400
-    if tipo == "camminata" and minuti < 30:
-        return jsonify({"ok": False, "error": "camminata sotto i 30 minuti, non valida"}), 400
+    if minuti < 30:
+        return jsonify({"ok": False, "error": "allenamento sotto i 30 minuti, non valido"}), 400
 
-    result = asyncio.run(checkin(tipo))
+    try:
+        result = asyncio.run(checkin(tipo))
+    except Exception as e:
+        import traceback as tb
+        log_error(str(e), f"gym-webhook tipo_raw={tipo_raw} minuti={minuti}", tb.format_exc())
+        return jsonify({"ok": False, "error": "errore interno"}), 500
     send_telegram(result["text"], result.get("markup"))
     return jsonify({"ok": True})
 
