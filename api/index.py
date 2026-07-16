@@ -311,19 +311,25 @@ def gym_webhook():
     tipo_raw = str(data.get("tipo", "")).strip().lower()
     tipo = "camminata" if any(k in tipo_raw for k in GYM_WALK_KEYWORDS) else "palestra"
 
+    minuti_raw = data.get("minuti", 0)
     try:
-        minuti = float(data.get("minuti", 0) or 0)
+        minuti = float(minuti_raw)
     except (TypeError, ValueError):
-        minuti = 0
+        import re as _re
+        match = _re.search(r"[\d.]+", str(minuti_raw))
+        minuti = float(match.group()) if match else 0
 
+    data_raw = data.get("data", "")
     try:
-        workout_date = datetime.strptime(str(data.get("data", "")), "%Y-%m-%d").date()
+        workout_date = datetime.strptime(str(data_raw), "%Y-%m-%d").date()
     except ValueError:
         workout_date = datetime.now(ROME).date()
 
     if workout_date != datetime.now(ROME).date():
+        log_error("gym-webhook: data non odierna", f"body grezzo: {data}", "")
         return jsonify({"ok": False, "error": "l'allenamento non è di oggi"}), 400
     if minuti < 30:
+        log_error("gym-webhook: sotto 30min", f"body grezzo: {data} (minuti_raw={minuti_raw!r} -> parsed={minuti})", "")
         return jsonify({"ok": False, "error": "allenamento sotto i 30 minuti, non valido"}), 400
 
     try:
