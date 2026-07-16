@@ -489,7 +489,7 @@ def tick():
             if not container:
                 continue
             if is_due(container, oggi, h, weather) and _once(f"water:{short}:{now.date()}:{h}"):
-                reminder = build_reminder(short, container, oggi)
+                reminder = build_reminder(short, container, oggi, weather)
                 send_telegram(reminder["text"], reminder["markup"])
                 done.append(f"water:{short}")
 
