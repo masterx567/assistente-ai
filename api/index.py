@@ -294,36 +294,51 @@ def webhook():
     return jsonify({"ok": True})
 
 
+GYM_WALK_KEYWORDS = ("cammin", "walk", "hik", "escursion", "trekking")
+
+
 @app.route("/api/gym-webhook", methods=["POST"])
 def gym_webhook():
-    """Check-in automatico da Apple Shortcuts (trigger su fine allenamento in Salute).
-    Body JSON: {"tipo": "palestra"|"camminata", "minuti": number, "data": "YYYY-MM-DD"}."""
+    """Check-in automatico da Apple Shortcuts (trigger su inizio/fine allenamento in Salute).
+    Body JSON: {"tipo": <tipo allenamento grezzo>, "minuti": number, "data": "YYYY-MM-DD"}.
+    Richiede >=30 min per contare. Il trigger scatta 2x per allenamento (inizio+fine):
+    innocuo, checkin() e' gia' idempotente 1x/giorno."""
     provided = request.args.get("secret") or \
         request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not GYM_WEBHOOK_SECRET or provided != GYM_WEBHOOK_SECRET:
         return jsonify({"ok": False}), 403
 
     data = request.get_json(silent=True) or {}
-    tipo = str(data.get("tipo", "")).strip().lower()
-    if tipo not in ("palestra", "camminata"):
-        return jsonify({"ok": False, "error": "tipo deve essere 'palestra' o 'camminata'"}), 400
+    tipo_raw = str(data.get("tipo", "")).strip().lower()
+    tipo = "camminata" if any(k in tipo_raw for k in GYM_WALK_KEYWORDS) else "palestra"
 
+    minuti_raw = data.get("minuti", 0)
     try:
-        minuti = float(data.get("minuti", 0) or 0)
+        minuti = float(minuti_raw)
     except (TypeError, ValueError):
-        minuti = 0
+        import re as _re
+        match = _re.search(r"[\d.]+", str(minuti_raw))
+        minuti = float(match.group()) if match else 0
 
+    data_raw = data.get("data", "")
     try:
-        workout_date = datetime.strptime(str(data.get("data", "")), "%Y-%m-%d").date()
+        workout_date = datetime.strptime(str(data_raw)[:10], "%Y-%m-%d").date()
     except ValueError:
         workout_date = datetime.now(ROME).date()
 
     if workout_date != datetime.now(ROME).date():
+        log_error("gym-webhook: data non odierna", f"body grezzo: {data}", "")
         return jsonify({"ok": False, "error": "l'allenamento non è di oggi"}), 400
-    if tipo == "camminata" and minuti < 30:
-        return jsonify({"ok": False, "error": "camminata sotto i 30 minuti, non valida"}), 400
+    if minuti < 30:
+        log_error("gym-webhook: sotto 30min", f"body grezzo: {data} (minuti_raw={minuti_raw!r} -> parsed={minuti})", "")
+        return jsonify({"ok": False, "error": "allenamento sotto i 30 minuti, non valido"}), 400
 
-    result = asyncio.run(checkin(tipo))
+    try:
+        result = asyncio.run(checkin(tipo))
+    except Exception as e:
+        import traceback as tb
+        log_error(str(e), f"gym-webhook tipo_raw={tipo_raw} minuti={minuti}", tb.format_exc())
+        return jsonify({"ok": False, "error": "errore interno"}), 500
     send_telegram(result["text"], result.get("markup"))
     return jsonify({"ok": True})
 
