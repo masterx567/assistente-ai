@@ -207,9 +207,10 @@ def root():
 
 @app.route("/callback")
 def oauth_callback():
-    code = request.args.get("code", "")
-    state = request.args.get("state", "")
-    full_url = request.url
+    from markupsafe import escape
+    code = escape(request.args.get("code", ""))
+    state = escape(request.args.get("state", ""))
+    full_url = escape(request.url)
     return (
         f"<h2>OAuth Callback</h2>"
         f"<p><b>Code:</b> <code>{code}</code></p>"
@@ -221,9 +222,8 @@ def oauth_callback():
 
 @app.route("/api/webhook", methods=["POST"])
 def webhook():
-    if WEBHOOK_SECRET:
-        if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
-            return jsonify({"ok": False}), 403
+    if not WEBHOOK_SECRET or request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+        return jsonify({"ok": False}), 403
     data = request.get_json(silent=True) or {}
 
     # Gestione callback_query (tap su bottone inline, es. checklist viaggio)
