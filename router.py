@@ -914,10 +914,16 @@ Testo: {user_text}"""
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("{"); end_idx = raw.rfind("}") + 1
     data = json.loads(raw[start:end_idx])
-    via = data.get("via", "").strip() or "via sconosciuta"
-    comune = data.get("comune", "").strip() or "comune sconosciuto"
+    via = data.get("via", "").strip()
+    comune = data.get("comune", "").strip()
     prezzo = data.get("prezzo", 0)
     link = data.get("link", "").strip()
+    if not via or not comune:
+        # Link nudo: non riesco a leggere la pagina (immobiliare.it blocca lo scraping),
+        # meglio chiedere che salvare "via sconosciuta" — evita di sporcare /listacase
+        return ("Dal link da solo non riesco a leggere via/comune (i portali bloccano lo scraping). "
+                "Mandami di nuovo con i dettagli, es.:\n"
+                "\"aggiungi casa " + (link or "<link>") + " via Giovanni de' Medici Cesano Maderno 220000\"")
     return await add_house(via, comune, prezzo, link)
 
 
