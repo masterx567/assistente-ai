@@ -15,6 +15,7 @@ from agents.travel import create_trip, get_active_trip, get_trip_spending, forma
 from agents.piante import water_container, status_report
 from agents.astronomy import get_tonight_sky, get_best_night
 from agents.site_media import start_replace_flow, choose_page, confirm_replace, enable_site_mode, disable_site_mode, is_site_mode_active
+from agents.case import add_house, update_house_status, list_houses
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -119,6 +120,7 @@ async def route_message(user_text: str) -> str:
             "🌱 *Piante*: /piante (stato), \"annaffiato fioriera/vaso\"\n\n"
             "📰 *Notizie*: \"notizie\", \"briefing\"\n\n"
             "📦 *Pacchi*: \"traccia pacco <numero> [etichetta]\", \"dove sono i miei pacchi\"\n\n"
+            "🏠 *Ricerca casa*: \"aggiungi casa <link/prezzo/via/comune>\", \"casa <via> vista/chiamato/rivista/proposta/scartata\", /listacase\n\n"
             "🌐 *Sito*: /sito (apri modalità, poi manda allegati da sostituire), /end (chiudi)\n\n"
             "\"sì\"/\"no\" per confermare/annullare, /fine annulla qualsiasi flusso in corso."
         )
@@ -243,6 +245,25 @@ async def route_message(user_text: str) -> str:
     _explicit_calendar_event = "evento" in text_lower
     if (_trip_word or _trip_verb) and _trip_date and not _trip_delete and not _explicit_calendar_event:
         return await handle_new_trip_start(user_text)
+
+    # Ricerca casa: aggiungi (estrazione AI) — PRIMA del fallback checklist "aggiungi X",
+    # altrimenti con un viaggio attivo "aggiungi casa ..." ci finirebbe dentro come voce checklist
+    if text_lower.startswith("aggiungi casa"):
+        return await handle_add_house(user_text[len("aggiungi casa"):].strip())
+
+    # Ricerca casa: aggiornamento stato ("casa <via> vista/chiamato/rivista/proposta/scartata")
+    _casa_status_match = _re.match(
+        r"^casa\s+(.+?)\s+(chiamat[oa]|vist[oa]|rivist[oa]|propost[oa]|scartat?[ao]?|scartala)$",
+        text_lower)
+    if _casa_status_match:
+        result = await update_house_status(_casa_status_match.group(1), _casa_status_match.group(2))
+        return result if result else f"Non ho trovato una casa in '{_casa_status_match.group(1)}'."
+
+    # Ricerca casa: lista (scartate solo su richiesta esplicita)
+    if any(w in text_lower for w in ["case scartate", "case scartata"]):
+        return await list_houses(scartate=True)
+    if text_lower in ("/listacase", "lista case", "le mie case", "case") or "case in lista" in text_lower:
+        return await list_houses()
 
     # Entrate (controlla PRIMA delle transazioni spese)
     income_kw = [
@@ -873,6 +894,31 @@ Testo: {user_text}"""
             f"• *{source}* +€{amount:.2f}\n"
             f"• Data: {date_str}\n\n"
             f"Rispondi *sì* per confermare o *no* per annullare.")
+
+
+async def handle_add_house(user_text: str) -> str:
+    """Estrae link/prezzo/via/comune da testo libero e salva la casa (nessuna conferma, aggiunta diretta)."""
+    prompt = f"""Estrai da questo testo i dati di un annuncio immobiliare.
+Rispondi SOLO con JSON: {{"link": "url o stringa vuota", "prezzo": 123456, "via": "nome via e civico", "comune": "nome comune"}}
+Se un campo manca nel testo lascialo vuoto ("" o 0), non inventare.
+Esempi:
+- "https://immobiliare.it/xyz 250000 via Roma 12 Milano" → {{"link":"https://immobiliare.it/xyz","prezzo":250000,"via":"via Roma 12","comune":"Milano"}}
+- "trilocale via Dante 5 Cormano 180000 euro" → {{"link":"","prezzo":180000,"via":"via Dante 5","comune":"Cormano"}}
+Testo: {user_text}"""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 120, "temperature": 0})
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+    start = raw.find("{"); end_idx = raw.rfind("}") + 1
+    data = json.loads(raw[start:end_idx])
+    via = data.get("via", "").strip() or "via sconosciuta"
+    comune = data.get("comune", "").strip() or "comune sconosciuto"
+    prezzo = data.get("prezzo", 0)
+    link = data.get("link", "").strip()
+    return await add_house(via, comune, prezzo, link)
 
 
 async def _extract_category_query(user_text: str) -> str:

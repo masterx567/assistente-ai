@@ -22,6 +22,7 @@ agents/
   gamification.py  check-in palestra/camminata, xp/livelli/leghe, loot creature, streak settimanale, scudi
   site_media.py    sostituzione PDF/foto su lineaverdeonline.com (allegato Telegram → WP REST)
   tracking.py      tracking pacchi via 17track.net (stesso DB Reminders, prefix PACCO:)
+  case.py          ricerca casa: annunci + stato funnel (stesso DB Reminders, prefix CASA:)
 ```
 
 ## Notion DB IDs
@@ -122,6 +123,12 @@ Regola fissa: solo sostituzioni di contenuto già esistente sul sito, mai creazi
 ## Flusso tracking pacchi (tracking.py)
 "traccia pacco <numero> [etichetta libera]" → `track_package()` registra su 17track (`/track/v2.2/register`, carrier omesso = auto-detect) e salva entry `PACCO:{json}` su Reminders DB (sent=False = attivo). Tick orario (8-22, `check_all_packages()`) interroga `/track/v2.2/gettrackinfo` per tutti i pacchi attivi, notifica su Telegram SOLO se lo status 17track (`OutForDelivery`/`Delivered`/`Exception`/...) è cambiato dall'ultimo check salvato; su stato terminale (Delivered/DeliveryFailure/Expired/Exception) marca sent=True e smette di pollare. "dove sono i miei pacchi" → `list_packages()` mostra stato attuale di tutti i pacchi attivi.
 
+## Flusso ricerca casa (case.py)
+Nessun tick/polling — solo su comando esplicito, entry `CASA:{json}` su Reminders DB (`sent` sempre False, non usato come gate qui — il filtro "attiva/scartata" è sul campo `stato` dentro il JSON, non su `sent`).
+- "aggiungi casa `<testo libero>`" → Groq estrae link/prezzo/via/comune, salvataggio diretto senza conferma (stato iniziale `nuova`).
+- "casa `<via>` `<verbo>`" → `update_house_status()`, match fuzzy su via (substring in entrambe le direzioni), verbo normalizzato a stato canonico: funnel `nuova → chiamato → vista → rivista → proposta`, più `scartata` (terminale, raggiungibile da qualsiasi stato).
+- `/listacase` (alias: "lista case", "le mie case", "case") → tutte tranne `scartata`. "case scartate" → solo le scartate.
+
 ## Bug noti / fix applicati
 - `*` in merchant rompeva Markdown → retry senza `parse_mode`
 - callback_data max 64 byte → `sc:{i}` non UUID
@@ -129,5 +136,5 @@ Regola fissa: solo sostituzioni di contenuto già esistente sul sito, mai creazi
 - Whisper aggiunge punto finale → `rstrip(".!?,;:")` su text_lower
 - "crei/elimini" (congiuntivo) non matchavano keyword → aggiunte forme verbali
 - Prefissi conversazionali ("mi dici", "mostrami") strippati UNA VOLTA in cima al router
-- `get_pending_reminders()` salta entry con prefix `PENDING:` e `PACCO:` (altrimenti finivano trattate come promemoria reali)
+- `get_pending_reminders()` salta entry con prefix `PENDING:`, `PACCO:` e `CASA:` (altrimenti finivano trattate come promemoria reali)
 - Tick window 4 min (non 6) con cron 5 min → 1 fire max

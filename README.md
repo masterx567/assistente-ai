@@ -14,6 +14,7 @@ Risponde solo al chat ID del proprietario (`TELEGRAM_CHAT_ID`): non è un bot pu
 - **Palestra** — check-in automatico (via Health Auto Export), XP/livelli/leghe, streak settimanale con scudi
 - **Promemoria** — one-off o ricorrenti, gestiti via Notion
 - **Pacchi** — tracking spedizioni (17track), avviso automatico su cambio stato ("in consegna", "consegnato")
+- **Ricerca casa** — annunci tracciati con link/prezzo/via/comune, funnel di stato (nuova → chiamato → vista → rivista → proposta / scartata)
 - **Piante** — reminder irrigazione meteo-corretto
 
 Un unico cron job (`/api/tick`, ogni 5 min) orchestra tutti i job schedulati (briefing, reminder, riepiloghi, check meteo/astro).
@@ -65,6 +66,7 @@ Niente sintassi rigida, il router matcha keyword/frasi libere (vedi `router.py` 
 | Piante | `/piante`, "annaffiato vaso" |
 | Notizie | "notizie", "briefing" |
 | Pacchi | "traccia pacco \<numero\> \<etichetta\>", "dove sono i miei pacchi" |
+| Ricerca casa | "aggiungi casa \<link/prezzo/via/comune\>", "casa \<via\> vista/chiamato/rivista/proposta/scartata", `/listacase` |
 | Conferma/annulla | "sì" / "no", "/fine" |
 
 ## Setup
