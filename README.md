@@ -36,6 +36,35 @@ agents/          budget, calendar, news, reminders, studio, travel, piante, gami
 agents/SPEC.md   specifica tecnica completa (DB IDs, routing, bug noti, flussi di conferma)
 ```
 
+## Comandi
+
+Niente sintassi rigida, il router matcha keyword/frasi libere (vedi `router.py` per l'elenco completo). Riferimento rapido:
+
+| Vuoi... | Dì (esempi) |
+|---|---|
+| Aiuto | `/help`, "aiuto", "cosa sai fare" |
+| Saldo/spese/budget | "quanto ho speso", "budget", "quanto mi rimane in \<categoria\>", "ultime spese" |
+| Confronto/proiezione | "mese scorso", "quanto spenderò", "flusso di cassa" |
+| Patrimonio | "patrimonio", "andamento patrimonio" |
+| Rate BNPL | "rate", "piano di ammortamento", "rate klarna" |
+| Prestiti a persone | "ho prestato 50 a Mario", "restituito Mario", "prestiti" |
+| Entrata | "ho ricevuto 1500 di stipendio", "aggiungi entrata" |
+| Evento calendario | "aggiungi dentista venerdì alle 10", "elimina riunione", "sposta X a lunedì" |
+| Impegni | "agenda oggi", "impegni domani", "eventi luglio", "quando ho \<nome\>" |
+| Promemoria | "ricordami di chiamare Luigi domani alle 9" |
+| Piano di studio | "piano esami", "esame SQL passato" |
+| Nuovo viaggio | `/viaggio dal 1 al 3 settembre` |
+| Checklist viaggio | `/checklist`, "aggiungi occhiali alla checklist", "fatto passaporto" |
+| Budget viaggio | "budget viaggio" |
+| Cielo (Cormano) | `/cielo`, "cosa vedo stanotte", "fase lunare" |
+| Cielo (Alpe Ventina) | `/cielo valmalenco` |
+| Prossima serata serena | "prossima serata serena" |
+| Diario | "diario: giornata storta oggi", "diario di luglio" |
+| Palestra | "palestra", "camminata" (check-in), "stato palestra" (scheda XP/livello) |
+| Piante | `/piante`, "annaffiato vaso" |
+| Notizie | "notizie", "briefing" |
+| Conferma/annulla | "sì" / "no", "/fine" |
+
 ## Setup
 
 Variabili d'ambiente richieste (vedi `agents/SPEC.md` per l'elenco completo):
