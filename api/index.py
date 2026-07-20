@@ -12,7 +12,7 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from router import route_message, handle_checklist_toggle, handle_trip_transaction_delete
+from router import route_message, handle_checklist_toggle, handle_trip_transaction_delete, handle_attachment
 from agents.errors import log_error
 from agents.news import get_morning_briefing
 from agents.budget import get_budget_alerts, format_alerts, get_monthly_spending, get_weekly_spending, format_spending_summary, format_weekly_summary, mese_anno_it, check_subscription_reminders, get_food_digest, format_food_digest, check_commitment_reminders, check_loan_reminders, get_spending_anomalies, generate_spending_chart
@@ -278,6 +278,32 @@ def webhook():
             text = transcribed
         else:
             send_telegram("Non sono riuscito a trascrivere il messaggio.")
+
+    # Allegato (PDF/foto) → sostituzione contenuto sul sito lineaverdeonline.com
+    document = message.get("document")
+    photo = message.get("photo")
+    if not text and (document or photo) and chat_id == TELEGRAM_CHAT_ID:
+        caption = message.get("caption", "")
+        if document:
+            file_id = document.get("file_id", "")
+            filename = document.get("file_name", "file")
+            mime = document.get("mime_type", "application/octet-stream")
+        else:
+            largest = photo[-1]
+            file_id = largest.get("file_id", "")
+            filename = f"{file_id}.jpg"
+            mime = "image/jpeg"
+        try:
+            reply = asyncio.run(handle_attachment(file_id, filename, mime, caption))
+        except Exception as e:
+            import traceback as tb
+            log_error(str(e), f"attachment: {filename}", tb.format_exc())
+            reply = "⚠️ Errore interno gestendo l'allegato. Ho loggato il problema."
+        if isinstance(reply, dict):
+            send_telegram(reply["text"], reply.get("markup"))
+        else:
+            send_telegram(reply)
+        return jsonify({"ok": True})
 
     if text and chat_id == TELEGRAM_CHAT_ID:
         try:

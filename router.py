@@ -13,6 +13,7 @@ from agents.journal import add_journal_entry, get_journal_entries, format_journa
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan, find_course_by_name
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
 from agents.astronomy import get_tonight_sky, get_best_night
+from agents.site_media import start_replace_flow, choose_page, confirm_replace
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -179,6 +180,19 @@ async def route_message(user_text: str) -> str:
                      + format_checklist(checklist)),
             "markup": checklist_buttons(checklist),
         }
+
+    # Sostituzione allegati sito: step "manca la descrizione" (file arrivato senza caption)
+    _media_pending = await get_pending()
+    if _media_pending and _media_pending["action"] == "site_media_awaiting_description":
+        await clear_pending(_media_pending["id"])
+        p = _media_pending["payload"]
+        return await start_replace_flow(p["file_id"], p["filename"], p["mime"], user_text.strip(),
+                                         save_pending, get_pending, clear_pending)
+
+    # Sostituzione allegati sito: step "scegli la pagina" (più pagine candidate trovate)
+    if _media_pending and _media_pending["action"] == "site_media_choose_page":
+        await clear_pending(_media_pending["id"])
+        return await choose_page(_media_pending["payload"], user_text.strip(), save_pending)
 
     # Nuovo viaggio: step 1, estrai le date e chiedi la destinazione.
     # Basta la parola "viaggio"/"vacanza" + una data ovunque nel testo — controllato PRIMA di
@@ -644,6 +658,17 @@ async def handle_calendar_action(user_text: str) -> str:
         return "Non ho capito. Esempi: 'aggiungi dentista venerdì alle 10', 'elimina riunione'"
 
 
+async def handle_attachment(file_id: str, filename: str, mime: str, caption: str) -> str | dict:
+    """Entry point da api/index.py quando arriva un documento/foto Telegram.
+    Se manca la caption chiede dove piazzarlo, altrimenti avvia subito la ricerca pagina."""
+    if not caption.strip():
+        await save_pending("site_media_awaiting_description",
+                            {"file_id": file_id, "filename": filename, "mime": mime})
+        return "Ricevuto. Dove lo metto?"
+    return await start_replace_flow(file_id, filename, mime, caption.strip(),
+                                     save_pending, get_pending, clear_pending)
+
+
 async def handle_confirm() -> str | dict:
     pending = await get_pending()
     if not pending:
@@ -658,6 +683,8 @@ async def handle_confirm() -> str | dict:
         next_course = await get_next_course()
         next_line = format_next_course_line(next_course) if next_course else "\n🎓 Piano di studio completato!"
         return f"✅ Segnato come completato: *{payload['corso']}*.{next_line}"
+    elif action == "site_media_confirm":
+        return await confirm_replace(payload)
     return "Azione sconosciuta."
 
 

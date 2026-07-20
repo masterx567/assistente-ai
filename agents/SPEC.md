@@ -20,6 +20,7 @@ agents/
   errors.py      log errori su BotErrors DB Notion
   piante.py      reminder irrigazione (fioriera/vaso), mood/streak, meteo Cormano
   gamification.py  check-in palestra/camminata, xp/livelli/leghe, loot creature, streak settimanale, scudi
+  site_media.py    sostituzione PDF/foto su lineaverdeonline.com (allegato Telegram → WP REST)
 ```
 
 ## Notion DB IDs
@@ -42,6 +43,7 @@ GROQ_API_KEY
 GOOGLE_CLIENT_ID  GOOGLE_CLIENT_SECRET  GOOGLE_REFRESH_TOKEN
 GOOGLE_CALENDAR_ICAL_URL
 GYM_WEBHOOK_SECRET   # POST /api/gym-webhook (check-in automatico da Apple Shortcuts)
+WP_APP_USER  WP_APP_PASSWORD   # Application Password WP (wp_16605717) per site_media.py
 ```
 
 ## Cron
@@ -99,6 +101,19 @@ Router: `"stato palestra"` (scheda) controllato PRIMA di `"palestra"`/`"camminat
 - `StreakBrokenRecently` (checkbox) fa comparire un messaggio di rientro non punitivo al check-in successivo a una settimana fallita, poi si resetta. Nessun reward materiale nel rientro (evita l'incentivo perverso a fallire apposta per il bonus).
 
 **Check-in automatico (anti-bugia)**: `POST /api/gym-webhook?secret=GYM_WEBHOOK_SECRET`. Fonte dati: app **Health Auto Export** (automazione REST API su nuovo allenamento) — scartato l'approccio via Apple Shortcuts nativo (property picker troppo inconsistente/fragile su iOS, vedi commit `4db2201` e precedenti per la storia). Body atteso: `{"data":{"workouts":[{"name":...,"start":"yyyy-MM-dd HH:mm:ss Z","duration":<secondi>, ...}]}}` (schema Health Auto Export v2, vedi [wiki ufficiale](https://github.com/Lybron/health-auto-export/wiki/API-Export---JSON-Format)). Prende l'ultimo elemento dell'array `workouts`. Validazione server: `start` deve essere oggi, `duration/60 >= 30` minuti. Rifiuti loggati su BotErrors col workout grezzo per debug.
+
+## Flusso sostituzione allegati sito (site_media.py)
+1. Documento/foto Telegram senza testo intercettato in `api/index.py` PRIMA del check `text and chat_id`, passato a `handle_attachment(file_id, filename, mime, caption)`.
+2. Caption vuota → `save_pending("site_media_awaiting_description", {...})`, chiede "Dove lo metto?"; risposta testuale successiva viene letta come descrizione.
+3. `start_replace_flow`: cerca pagine/articoli WP (`?search=`) che matchano la descrizione.
+   - 0 risultati → si ferma, chiede il nome esatto della pagina.
+   - >1 risultato → `save_pending("site_media_choose_page", {...candidates})`, mostra lista numerata; risposta numerica → `choose_page()`.
+   - 1 risultato → cerca nel contenuto raw della pagina un link/immagine (`_find_reference`, regex + Groq se ambiguo) che corrisponda alla descrizione.
+     - nessun match → si ferma ("non trovo niente da sostituire"), NON aggiunge mai contenuto nuovo.
+     - match trovato → `save_pending("site_media_confirm", {...})`, mostra preview e chiede conferma sì/no.
+4. "sì" → `handle_confirm()` → `confirm_replace()`: scarica il file da Telegram, lo carica su `/wp/v2/media` (nuovo URL, WP non sovrascrive un URL esistente), sostituisce il vecchio URL col nuovo nel contenuto della pagina, pubblica.
+
+Regola fissa: solo sostituzioni di contenuto già esistente sul sito, mai creazione di contenuto nuovo in autonomia.
 
 ## Bug noti / fix applicati
 - `*` in merchant rompeva Markdown → retry senza `parse_mode`
