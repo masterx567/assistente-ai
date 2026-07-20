@@ -15,7 +15,9 @@ from agents.travel import create_trip, get_active_trip, get_trip_spending, forma
 from agents.piante import water_container, status_report
 from agents.astronomy import get_tonight_sky, get_best_night
 from agents.site_media import start_replace_flow, choose_page, confirm_replace, enable_site_mode, disable_site_mode, is_site_mode_active
-from agents.case import add_house, update_house_status, list_houses
+from agents.case import (add_house, update_house_status, list_houses, find_house,
+    open_house_session, close_house_session, get_active_house_session, update_house_field,
+    set_house_status, format_house, VERBO_STATO_WORDS)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -77,12 +79,36 @@ async def route_message(user_text: str) -> str:
         return ("🔧 Modalità sito attiva. Manda un allegato (PDF/foto) con la descrizione "
                 "di cosa sostituire. /end per uscire.")
     if text_lower == "/end":
-        was_active = await is_site_mode_active()
+        was_site = await is_site_mode_active()
         await disable_site_mode()
         _site_pending = await get_pending()
         if _site_pending and _site_pending["action"].startswith("site_media_"):
             await clear_pending(_site_pending["id"])
-        return "✅ Modalità sito disattivata." if was_active else "Nessuna modalità attiva."
+        was_house = bool(await get_active_house_session())
+        await close_house_session()
+        if was_site or was_house:
+            return "✅ Modalità disattivata."
+        return "Nessuna modalità attiva."
+
+    # Sessione casa: mentre attiva, "via/comune/prezzo/link <valore>" o uno stato secco
+    # aggiornano la casa selezionata senza dover ripetere la via ogni volta
+    _house_session = await get_active_house_session()
+    if _house_session:
+        _field_match = _re.match(r"^(via|comune|prezzo|link)\s+(.+)$", user_text.strip(), _re.IGNORECASE)
+        if _field_match:
+            field = _field_match.group(1).lower()
+            value = _field_match.group(2).strip()
+            if field == "prezzo":
+                _num = _re.search(r"\d+[.,]?\d*", value)
+                value = float(_num.group().replace(",", ".")) if _num else 0
+            updated = await update_house_field(_house_session["id"], **{field: value})
+            if updated:
+                return format_house(updated)
+            return "Non trovo più questa casa (forse eliminata), /end per uscire dalla sessione."
+        if text_lower.strip() in VERBO_STATO_WORDS:
+            updated = await set_house_status(_house_session["id"], text_lower.strip())
+            if updated:
+                return format_house(updated)
 
     if any(w in text_lower for w in ["prossima serata serena", "prossima serata buona", "quando è sereno", "quando e sereno", "migliore serata"]):
         location = "valmalenco" if any(w in text_lower for w in ["valmalenco", "val malenco", "ventina"]) else "cormano"
@@ -120,7 +146,8 @@ async def route_message(user_text: str) -> str:
             "🌱 *Piante*: /piante (stato), \"annaffiato fioriera/vaso\"\n\n"
             "📰 *Notizie*: \"notizie\", \"briefing\"\n\n"
             "📦 *Pacchi*: \"traccia pacco <numero> [etichetta]\", \"dove sono i miei pacchi\"\n\n"
-            "🏠 *Ricerca casa*: \"aggiungi casa <link/prezzo/via/comune>\", \"casa <via> vista/chiamato/rivista/proposta/scartata\", /listacase\n\n"
+            "🏠 *Ricerca casa*: \"aggiungi casa <link/prezzo/via/comune>\", \"casa <via> vista/chiamato/rivista/proposta/scartata\" (aggiornamento rapido), "
+            "\"casa <via>\" da sola apre una sessione di modifica (poi \"comune ...\"/\"prezzo ...\"/stato secco, /end per uscire), /listacase\n\n"
             "🌐 *Sito*: /sito (apri modalità, poi manda allegati da sostituire), /end (chiudi)\n\n"
             "\"sì\"/\"no\" per confermare/annullare, /fine annulla qualsiasi flusso in corso."
         )
@@ -278,11 +305,22 @@ async def route_message(user_text: str) -> str:
         result = await update_house_status(_casa_status_match.group(1), _casa_status_match.group(2))
         return result if result else f"Non ho trovato una casa in '{_casa_status_match.group(1)}'."
 
-    # Ricerca casa: lista (scartate solo su richiesta esplicita)
+    # Ricerca casa: lista (scartate solo su richiesta esplicita) — controllato PRIMA di
+    # "casa <via>" bare qui sotto, altrimenti "case scartate"/"case" ci finirebbero dentro
     if any(w in text_lower for w in ["case scartate", "case scartata"]):
         return await list_houses(scartate=True)
     if text_lower in ("/listacase", "lista case", "le mie case", "case") or "case in lista" in text_lower:
         return await list_houses()
+
+    # Ricerca casa: "casa <via>" bare (nessuno stato dopo) apre la sessione di modifica
+    _casa_open_match = _re.match(r"^casa\s+(.+)$", text_lower)
+    if _casa_open_match:
+        house = await find_house(_casa_open_match.group(1))
+        if not house:
+            return f"Non ho trovato una casa in '{_casa_open_match.group(1)}'."
+        await open_house_session(house["id"])
+        return (format_house(house) + "\n\nSessione aperta — scrivi \"via/comune/prezzo/link <valore>\" "
+                "o uno stato (vista/chiamato/rivista/proposta/scartata) per aggiornarla. /end per uscire.")
 
     # Entrate (controlla PRIMA delle transazioni spese)
     income_kw = [

@@ -125,8 +125,9 @@ Regola fissa: solo sostituzioni di contenuto già esistente sul sito, mai creazi
 
 ## Flusso ricerca casa (case.py)
 Nessun tick/polling — solo su comando esplicito, entry `CASA:{json}` su Reminders DB (`sent` sempre False, non usato come gate qui — il filtro "attiva/scartata" è sul campo `stato` dentro il JSON, non su `sent`).
-- "aggiungi casa `<testo libero>`" → Groq estrae link/prezzo/via/comune, salvataggio diretto senza conferma (stato iniziale `nuova`).
-- "casa `<via>` `<verbo>`" → `update_house_status()`, match fuzzy su via (substring in entrambe le direzioni), verbo normalizzato a stato canonico: funnel `nuova → chiamato → vista → rivista → proposta`, più `scartata` (terminale, raggiungibile da qualsiasi stato).
+- "aggiungi casa `<testo libero>`" → Groq estrae link/prezzo/via/comune. Se via/comune mancano (link nudo, i portali immobiliari bloccano lo scraping server-side, 403 anche con UA browser) → flusso guidato `save_pending("new_house_awaiting_via"→"...comune"→"...prezzo")`, un campo alla volta, stesso pattern di `/viaggio`. Salvataggio diretto senza conferma finale (stato iniziale `nuova`).
+- "casa `<via>` `<verbo>`" → `update_house_status()`, match fuzzy su via (substring in entrambe le direzioni), aggiornamento rapido one-shot senza aprire sessione. Verbo normalizzato a stato canonico: funnel `nuova → chiamato → vista → rivista → proposta`, più `scartata` (terminale, raggiungibile da qualsiasi stato).
+- "casa `<via>`" (bare, senza verbo dopo) → apre **sessione di modifica** (`open_house_session`, flag `CASAMODE:<house_id>` su Reminders DB, stesso pattern SITEMODE di site_media.py ma con l'id casa nel titolo invece di ON/OFF fisso). Finché attiva: "via/comune/prezzo/link `<valore>`" aggiorna il campo, uno stato secco (es. "vista") aggiorna lo stato — niente bisogno di ripetere la via. Il gate è specifico (richiede prefix campo o parola-stato esatta), non intercetta testo generico, quindi il resto del bot funziona normale durante la sessione. `/end` chiude sia la sessione casa sia la modalità sito (condividono il comando).
 - `/listacase` (alias: "lista case", "le mie case", "case") → tutte tranne `scartata`. "case scartate" → solo le scartate.
 
 ## Bug noti / fix applicati

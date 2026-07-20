@@ -67,6 +67,7 @@ Niente sintassi rigida, il router matcha keyword/frasi libere (vedi `router.py` 
 | Notizie | "notizie", "briefing" |
 | Pacchi | "traccia pacco \<numero\> \<etichetta\>", "dove sono i miei pacchi" |
 | Ricerca casa | "aggiungi casa \<link/prezzo/via/comune\>", "casa \<via\> vista/chiamato/rivista/proposta/scartata", `/listacase` |
+| Modifica casa (sessione) | "casa \<via\>" da sola apre la sessione, poi "comune ...", "prezzo ...", o stato secco — `/end` per uscire |
 | Conferma/annulla | "sì" / "no", "/fine" |
 
 ## Setup
