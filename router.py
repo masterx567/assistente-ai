@@ -220,6 +220,25 @@ async def route_message(user_text: str) -> str:
             "markup": checklist_buttons(checklist),
         }
 
+    # Nuovo annuncio casa: link nudo non leggibile, chiede via/comune/prezzo uno alla volta
+    _house_pending = await get_pending()
+    if _house_pending and _house_pending["action"] == "new_house_awaiting_via":
+        await clear_pending(_house_pending["id"])
+        await save_pending("new_house_awaiting_comune", {**_house_pending["payload"], "via": user_text.strip()})
+        return "Comune?"
+    if _house_pending and _house_pending["action"] == "new_house_awaiting_comune":
+        await clear_pending(_house_pending["id"])
+        payload = {**_house_pending["payload"], "comune": user_text.strip()}
+        if payload.get("prezzo"):
+            return await add_house(payload["via"], payload["comune"], payload["prezzo"], payload.get("link", ""))
+        await save_pending("new_house_awaiting_prezzo", payload)
+        return "Prezzo? (scrivi 0 se non lo sai)"
+    if _house_pending and _house_pending["action"] == "new_house_awaiting_prezzo" and _num_match:
+        await clear_pending(_house_pending["id"])
+        amount = float(_num_match.group().replace(",", "."))
+        payload = _house_pending["payload"]
+        return await add_house(payload["via"], payload["comune"], amount, payload.get("link", ""))
+
     # Sostituzione allegati sito: step "manca la descrizione" (file arrivato senza caption)
     _media_pending = await get_pending()
     if _media_pending and _media_pending["action"] == "site_media_awaiting_description":
@@ -920,10 +939,9 @@ Testo: {user_text}"""
     link = data.get("link", "").strip()
     if not via or not comune:
         # Link nudo: non riesco a leggere la pagina (immobiliare.it blocca lo scraping),
-        # meglio chiedere che salvare "via sconosciuta" — evita di sporcare /listacase
-        return ("Dal link da solo non riesco a leggere via/comune (i portali bloccano lo scraping). "
-                "Mandami di nuovo con i dettagli, es.:\n"
-                "\"aggiungi casa " + (link or "<link>") + " via Giovanni de' Medici Cesano Maderno 220000\"")
+        # chiedo via/comune/prezzo uno alla volta invece di salvare "via sconosciuta"
+        await save_pending("new_house_awaiting_via", {"link": link, "prezzo": prezzo})
+        return "Non riesco a leggere i dettagli dal link (i portali bloccano lo scraping). Via?"
     return await add_house(via, comune, prezzo, link)
 
 
