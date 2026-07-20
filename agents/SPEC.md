@@ -21,6 +21,7 @@ agents/
   piante.py      reminder irrigazione (fioriera/vaso), mood/streak, meteo Cormano
   gamification.py  check-in palestra/camminata, xp/livelli/leghe, loot creature, streak settimanale, scudi
   site_media.py    sostituzione PDF/foto su lineaverdeonline.com (allegato Telegram → WP REST)
+  tracking.py      tracking pacchi via 17track.net (stesso DB Reminders, prefix PACCO:)
 ```
 
 ## Notion DB IDs
@@ -44,6 +45,7 @@ GOOGLE_CLIENT_ID  GOOGLE_CLIENT_SECRET  GOOGLE_REFRESH_TOKEN
 GOOGLE_CALENDAR_ICAL_URL
 GYM_WEBHOOK_SECRET   # POST /api/gym-webhook (check-in automatico da Apple Shortcuts)
 WP_APP_USER  WP_APP_PASSWORD   # Application Password WP (wp_16605717) per site_media.py
+TRACK17_API_KEY   # 17track.net, tracking pacchi
 ```
 
 ## Cron
@@ -64,6 +66,7 @@ Finestre: `0<=m<=4` (4 min max 1 fire per evento).
 | domenica h==21, 0<=m<=4 | valuta settimana palestra (target 3 check-in), offre scudo se fallita |
 | lunedì h==23, 0<=m<=4 | fallback: applica penalità palestra se scudo non usato entro deadline |
 | venerdì h==20, 0<=m<=4 | nudge palestra se sei a 1-2/3 questa settimana |
+| h 8-22, 0<=m<=4 (orario) | check stato pacchi via 17track, notifica solo su cambio stato |
 
 ## Routing (ordine CRITICO — non riordinare)
 1. confirm kw → `handle_confirm()`
@@ -116,6 +119,9 @@ Router: `"stato palestra"` (scheda) controllato PRIMA di `"palestra"`/`"camminat
 
 Regola fissa: solo sostituzioni di contenuto già esistente sul sito, mai creazione di contenuto nuovo in autonomia.
 
+## Flusso tracking pacchi (tracking.py)
+"traccia pacco <numero> [etichetta libera]" → `track_package()` registra su 17track (`/track/v2.2/register`, carrier omesso = auto-detect) e salva entry `PACCO:{json}` su Reminders DB (sent=False = attivo). Tick orario (8-22, `check_all_packages()`) interroga `/track/v2.2/gettrackinfo` per tutti i pacchi attivi, notifica su Telegram SOLO se lo status 17track (`OutForDelivery`/`Delivered`/`Exception`/...) è cambiato dall'ultimo check salvato; su stato terminale (Delivered/DeliveryFailure/Expired/Exception) marca sent=True e smette di pollare. "dove sono i miei pacchi" → `list_packages()` mostra stato attuale di tutti i pacchi attivi.
+
 ## Bug noti / fix applicati
 - `*` in merchant rompeva Markdown → retry senza `parse_mode`
 - callback_data max 64 byte → `sc:{i}` non UUID
@@ -123,5 +129,5 @@ Regola fissa: solo sostituzioni di contenuto già esistente sul sito, mai creazi
 - Whisper aggiunge punto finale → `rstrip(".!?,;:")` su text_lower
 - "crei/elimini" (congiuntivo) non matchavano keyword → aggiunte forme verbali
 - Prefissi conversazionali ("mi dici", "mostrami") strippati UNA VOLTA in cima al router
-- `get_pending_reminders()` salta entry con prefix `PENDING:`
+- `get_pending_reminders()` salta entry con prefix `PENDING:` e `PACCO:` (altrimenti finivano trattate come promemoria reali)
 - Tick window 4 min (non 6) con cron 5 min → 1 fire max

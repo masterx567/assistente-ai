@@ -548,6 +548,14 @@ def tick():
             send_telegram(alert)
             done.append("astro_event")
 
+    if 8 <= h <= 22 and m <= 4 and _once(f"pacchi:{now.date()}:{h}"):
+        from agents.tracking import check_all_packages
+        pkg_msgs = asyncio.run(check_all_packages())
+        for msg in pkg_msgs:
+            send_telegram(msg)
+        if pkg_msgs:
+            done.append(f"pacchi:{len(pkg_msgs)}")
+
     # Reminders eventi calendario
     done.extend(_check_reminders(now))
 

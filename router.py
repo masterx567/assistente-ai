@@ -118,6 +118,7 @@ async def route_message(user_text: str) -> str:
             "🏋️ *Palestra*: \"palestra\" o \"camminata\" (check-in), \"stato palestra\" (scheda XP/livello)\n\n"
             "🌱 *Piante*: /piante (stato), \"annaffiato fioriera/vaso\"\n\n"
             "📰 *Notizie*: \"notizie\", \"briefing\"\n\n"
+            "📦 *Pacchi*: \"traccia pacco <numero> [etichetta]\", \"dove sono i miei pacchi\"\n\n"
             "🌐 *Sito*: /sito (apri modalità, poi manda allegati da sostituire), /end (chiudi)\n\n"
             "\"sì\"/\"no\" per confermare/annullare, /fine annulla qualsiasi flusso in corso."
         )
@@ -320,6 +321,17 @@ async def route_message(user_text: str) -> str:
         return format_events(events)
 
     # Promemoria
+    # Tracking pacchi (17track) — "traccia pacco <numero> [etichetta libera]"
+    _track_match = _re.search(
+        r"(?:traccia|monitora|aggiungi)\s+(?:il\s+)?pacco\s+(\S+)\s*(.*)",
+        user_text, _re.IGNORECASE)
+    if _track_match:
+        from agents.tracking import track_package
+        return await track_package(_track_match.group(1), _track_match.group(2).strip())
+    if any(w in text_lower for w in ["dove sono i miei pacchi", "stato pacchi", "i miei pacchi", "pacchi in arrivo", "stato pacco"]):
+        from agents.tracking import list_packages
+        return await list_packages()
+
     reminder_kw = [
         "ricordami", "ricorda di", "ricordati", "ricordamelo",
         "promemoria", "reminder", "non dimenticare", "non mi far dimenticare",

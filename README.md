@@ -13,6 +13,7 @@ Risponde solo al chat ID del proprietario (`TELEGRAM_CHAT_ID`): non è un bot pu
 - **Viaggi** — checklist con progress bar, spese di viaggio
 - **Palestra** — check-in automatico (via Health Auto Export), XP/livelli/leghe, streak settimanale con scudi
 - **Promemoria** — one-off o ricorrenti, gestiti via Notion
+- **Pacchi** — tracking spedizioni (17track), avviso automatico su cambio stato ("in consegna", "consegnato")
 - **Piante** — reminder irrigazione meteo-corretto
 
 Un unico cron job (`/api/tick`, ogni 5 min) orchestra tutti i job schedulati (briefing, reminder, riepiloghi, check meteo/astro).
@@ -63,6 +64,7 @@ Niente sintassi rigida, il router matcha keyword/frasi libere (vedi `router.py` 
 | Palestra | "palestra", "camminata" (check-in), "stato palestra" (scheda XP/livello) |
 | Piante | `/piante`, "annaffiato vaso" |
 | Notizie | "notizie", "briefing" |
+| Pacchi | "traccia pacco \<numero\> \<etichetta\>", "dove sono i miei pacchi" |
 | Conferma/annulla | "sì" / "no", "/fine" |
 
 ## Setup
@@ -75,6 +77,7 @@ NOTION_TOKEN, NOTION_DB_TRANSACTIONS, NOTION_DB_CATEGORIES
 GROQ_API_KEY
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
 GYM_WEBHOOK_SECRET
+TRACK17_API_KEY
 ```
 
 Deploy su Vercel (build automatico da `vercel.json`), webhook Telegram puntato su `/api/webhook`, cron esterno (es. cron-job.org) che chiama `/api/tick` ogni 5 minuti.
