@@ -1,6 +1,6 @@
 import httpx
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
@@ -91,16 +91,27 @@ async def get_weather_adjustment() -> dict:
         return {"pioggia_mm": 0, "temp_max": 0}
 
 
+def effective_intervallo(container: dict, weather: dict) -> int:
+    intervallo = container["intervallo"]
+    if weather["temp_max"] > 30:
+        intervallo = max(1, intervallo - 1)
+    return intervallo
+
+
+def prossimo_controllo(container: dict, weather: dict) -> date | None:
+    """Data stimata del prossimo controllo (None se mai annaffiato)."""
+    if container["ultimo"] is None:
+        return None
+    return container["ultimo"] + timedelta(days=effective_intervallo(container, weather))
+
+
 def is_due(container: dict, oggi: date, hour: int, weather: dict) -> bool:
     """Piante coperte: pioggia leggera non conta, solo un acquazzone (>=5mm) ammorbidisce
     di mezza giornata (salta solo il controllo delle 8, non annulla la giornata intera)."""
     if container["ultimo"] is None:
         return False
-    intervallo_effettivo = container["intervallo"]
-    if weather["temp_max"] > 30:
-        intervallo_effettivo = max(1, intervallo_effettivo - 1)
     giorni_passati = (oggi - container["ultimo"]).days
-    due = giorni_passati >= intervallo_effettivo
+    due = giorni_passati >= effective_intervallo(container, weather)
     if due and hour == 8 and weather["pioggia_mm"] >= 5:
         return False
     return due
@@ -122,17 +133,52 @@ def _pick_tip(oggi: date) -> str:
     return TIPS[oggi.toordinal() % len(TIPS)]
 
 
-def build_reminder(short: str, container: dict, oggi: date) -> dict:
+def _prossimo_label(container: dict, weather: dict, oggi: date, dopo_annaffiata: bool = False) -> str:
+    """Testo prossimo controllo. Se dopo_annaffiata, calcola come se annaffiassi oggi
+    (usato nel reminder, dove si presume l'azione appena richiesta)."""
+    if dopo_annaffiata:
+        prossimo = oggi + timedelta(days=effective_intervallo(container, weather))
+    else:
+        prossimo = prossimo_controllo(container, weather)
+        if prossimo is None:
+            return ""
+    delta = (prossimo - oggi).days
+    if delta <= 0:
+        return "prossimo controllo: oggi"
+    return f"prossimo controllo: {prossimo.strftime('%d/%m')} (tra {delta}gg)"
+
+
+def build_reminder(short: str, container: dict, oggi: date, weather: dict) -> dict:
     ritardo = giorni_ritardo(container, oggi) or 0
     emoji, testo = mood(ritardo)
     cfg = CONTAINERS[short]
     text = (f"{emoji} *{cfg['nome']}* ({container['piante']}): {testo}.\n"
-            f"Annaffia fino a che esce dal foro di drenaggio (~{cfg['ml']}).")
+            f"Annaffia fino a che esce dal foro di drenaggio (~{cfg['ml']}).\n"
+            f"Se annaffi ora, {_prossimo_label(container, weather, oggi, dopo_annaffiata=True)}.")
     if container["streak"] >= 3:
         text += f"\n🔥 {container['streak']} volte di fila in orario."
     text += f"\n\n💡 _{_pick_tip(oggi)}_"
     markup = {"inline_keyboard": [[{"text": "✅ Annaffiato", "callback_data": f"pw:{short}"}]]}
     return {"text": text, "markup": markup}
+
+
+async def status_report() -> str:
+    oggi = datetime.now(ROME).date()
+    containers = await get_all_containers()
+    weather = await get_weather_adjustment()
+    lines = ["🌱 *Stato piante*"]
+    for c in containers:
+        if c["ultimo"] is None:
+            lines.append(f"\n⚪ *{c['nome']}* ({c['piante']}): non ancora avviato")
+            continue
+        ritardo = giorni_ritardo(c, oggi)
+        emoji, testo = mood(ritardo)
+        giorni_fa = (oggi - c["ultimo"]).days
+        prossimo_txt = _prossimo_label(c, weather, oggi)
+        lines.append(f"\n{emoji} *{c['nome']}* ({c['piante']}): {testo}\n"
+                     f"ultima annaffiata {giorni_fa}gg fa ({c['ultimo'].strftime('%d/%m')}) · streak {c['streak']}\n"
+                     f"{prossimo_txt}")
+    return "\n".join(lines)
 
 
 async def water_container(short: str) -> str:
