@@ -11,6 +11,7 @@ import os
 import re
 import json
 import httpx
+from datetime import datetime, timezone
 
 WP_URL = "https://www.lineaverdeonline.com"
 WP_APP_USER = os.getenv("WP_APP_USER")
@@ -19,7 +20,56 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+DB_REMINDERS = "38a9d2a5-23ac-8158-badb-f41c332b13e4"
+_NOTION_HEADERS = {
+    "Authorization": f"Bearer {NOTION_TOKEN}",
+    "Notion-Version": "2022-06-28",
+    "Content-Type": "application/json",
+}
+_MODE_TITLE = "SITEMODE:ON"
+
 _AUTH = httpx.BasicAuth(WP_APP_USER or "", WP_APP_PASSWORD or "")
+
+
+async def is_site_mode_active() -> bool:
+    """Flag persistente: True tra /sito e /end. Riusa Reminders DB (stesso pattern di
+    TICKLOCK in pending.py), titolo esatto SITEMODE:ON, sent=True per non comparire
+    nelle query sent=False di pending/reminders."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_REMINDERS}/query",
+            headers=_NOTION_HEADERS, json={
+                "filter": {"property": "text", "title": {"equals": _MODE_TITLE}},
+                "page_size": 1,
+            })
+    return bool(r.json().get("results"))
+
+
+async def enable_site_mode():
+    if await is_site_mode_active():
+        return
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post("https://api.notion.com/v1/pages", headers=_NOTION_HEADERS, json={
+            "parent": {"database_id": DB_REMINDERS},
+            "properties": {
+                "text": {"title": [{"text": {"content": _MODE_TITLE}}]},
+                "remind_at": {"date": {"start": now_str}},
+                "sent": {"checkbox": True},
+            }
+        })
+
+
+async def disable_site_mode():
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_REMINDERS}/query",
+            headers=_NOTION_HEADERS, json={
+                "filter": {"property": "text", "title": {"equals": _MODE_TITLE}},
+                "page_size": 5,
+            })
+        for p in r.json().get("results", []):
+            await client.patch(f"https://api.notion.com/v1/pages/{p['id']}",
+                                headers=_NOTION_HEADERS, json={"archived": True})
 
 _MEDIA_URL_RE = re.compile(
     r'(?:href|src)="([^"]+\.(?:pdf|jpe?g|png|webp))"', re.IGNORECASE

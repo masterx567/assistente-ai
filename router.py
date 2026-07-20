@@ -14,7 +14,7 @@ from agents.studio import mark_course_done, get_next_course, format_next_course_
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
 from agents.piante import water_container, status_report
 from agents.astronomy import get_tonight_sky, get_best_night
-from agents.site_media import start_replace_flow, choose_page, confirm_replace
+from agents.site_media import start_replace_flow, choose_page, confirm_replace, enable_site_mode, disable_site_mode, is_site_mode_active
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -69,6 +69,20 @@ async def route_message(user_text: str) -> str:
     if text_lower == "/piante":
         return await status_report()
 
+    # Modalità sito: /sito apre la sessione (allegati successivi = sostituzione contenuto
+    # sul sito, senza dover ripetere parole chiave), /end la chiude
+    if text_lower == "/sito":
+        await enable_site_mode()
+        return ("🔧 Modalità sito attiva. Manda un allegato (PDF/foto) con la descrizione "
+                "di cosa sostituire. /end per uscire.")
+    if text_lower == "/end":
+        was_active = await is_site_mode_active()
+        await disable_site_mode()
+        _site_pending = await get_pending()
+        if _site_pending and _site_pending["action"].startswith("site_media_"):
+            await clear_pending(_site_pending["id"])
+        return "✅ Modalità sito disattivata." if was_active else "Nessuna modalità attiva."
+
     if any(w in text_lower for w in ["prossima serata serena", "prossima serata buona", "quando è sereno", "quando e sereno", "migliore serata"]):
         location = "valmalenco" if any(w in text_lower for w in ["valmalenco", "val malenco", "ventina"]) else "cormano"
         return await get_best_night(location)
@@ -92,6 +106,7 @@ async def route_message(user_text: str) -> str:
             "🏋️ *Palestra*: \"palestra\" o \"camminata\" per check-in, \"stato palestra\" per la scheda completa\n\n"
             "🌱 *Piante*: /piante (stato), \"annaffiato fioriera/vaso\" per confermare\n\n"
             "🔔 *Promemoria*: \"ricordami di...\"\n\n"
+            "🌐 *Sito*: /sito (apri modalità, poi manda allegati da sostituire), /end (chiudi)\n\n"
             "/fine annulla qualsiasi flusso in corso."
         )
 
@@ -669,7 +684,11 @@ async def handle_calendar_action(user_text: str) -> str:
 
 async def handle_attachment(file_id: str, filename: str, mime: str, caption: str) -> str | dict:
     """Entry point da api/index.py quando arriva un documento/foto Telegram.
-    Se manca la caption chiede dove piazzarlo, altrimenti avvia subito la ricerca pagina."""
+    Se manca la caption chiede dove piazzarlo, altrimenti avvia subito la ricerca pagina.
+    Attivo solo dentro /sito ... /end, altrimenti un allegato mandato per altri motivi
+    non finisce per forza dentro il flusso di sostituzione sito."""
+    if not await is_site_mode_active():
+        return "Manda /sito prima se vuoi sostituire qualcosa sul sito."
     if not caption.strip():
         await save_pending("site_media_awaiting_description",
                             {"file_id": file_id, "filename": filename, "mime": mime})
