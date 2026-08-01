@@ -49,7 +49,7 @@ Niente sintassi rigida, il router matcha keyword/frasi libere (vedi `router.py` 
 | Confronto/proiezione | "mese scorso", "quanto spenderò", "flusso di cassa" |
 | Patrimonio | "patrimonio", "andamento patrimonio" |
 | Rate BNPL | "rate", "piano di ammortamento", "rate klarna" |
-| Prestiti a persone | "ho prestato 50 a Mario", "restituito Mario", "prestiti" |
+| Prestiti a persone | "ho prestato 50 a Mario", "restituito 300 di Mario" (parziale), "restituito Mario" (saldato), "prestiti" |
 | Entrata | "ho ricevuto 1500 di stipendio", "aggiungi entrata" |
 | Evento calendario | "aggiungi dentista venerdì alle 10", "elimina riunione", "sposta X a lunedì" |
 | Impegni | "agenda oggi", "impegni domani", "eventi luglio", "quando ho \<nome\>" |
