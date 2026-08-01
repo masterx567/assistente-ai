@@ -237,9 +237,16 @@ async def _tx_save(tx: dict, merchant: str, category_id: str | None) -> None:
 
 # ── BNPL (buy-now-pay-later) commitments ──────────────────────────────────────
 
+def _merchant_key(s: str) -> str:
+    """Solo alfanumerico, lowercase — per confrontare 'Klarna*volagratis.co' e
+    'Klarnavolagratis' come lo stesso merchant nonostante punteggiatura/suffissi diversi."""
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
 async def _find_active_commitment(merchant: str, booking_date: str) -> dict | None:
-    """Cerca piano attivo per merchant (case-insensitive — il testo remittance della banca
-    non usa maiuscole/minuscole in modo coerente, es. "Klarna*Ticketone" vs "Klarna*ticketone").
+    """Cerca piano attivo per merchant (confronto normalizzato, sottostringa in entrambe le
+    direzioni — il testo remittance della banca varia tra un pagamento e l'altro per lo stesso
+    piano: maiuscole diverse, asterischi, suffissi come ".co" che compaiono/spariscono).
     Matcha sulla DATA (rata più vicina alla next_due attesa, ±10gg), non sull'importo: le rate
     Klarna/Scalapay non sono sempre uguali tra loro (es. prima rata più alta delle successive),
     quindi confrontare gli importi creava piani duplicati per la stessa spesa."""
@@ -249,15 +256,16 @@ async def _find_active_commitment(merchant: str, booking_date: str) -> dict | No
             f"https://api.notion.com/v1/databases/{DB_COMMITMENTS}/query",
             headers=NOTION_HEADERS, json=body,
         )
-    merchant_l = merchant.lower()
+    merchant_key = _merchant_key(merchant)
     tx_date = date.fromisoformat(booking_date)
     best = None
     best_diff = None
     for page in r.json().get("results", []):
         props = page["properties"]
         name_parts = props.get("Name", {}).get("title", [])
-        name = (name_parts[0]["plain_text"] if name_parts else "").lower()
-        if not name.startswith(merchant_l):
+        name = name_parts[0]["plain_text"] if name_parts else ""
+        name_key = _merchant_key(name.split(" (€")[0])
+        if merchant_key not in name_key and name_key not in merchant_key:
             continue
         remaining = props.get("amount_remaining", {}).get("number") or 0
         due_iso = (props.get("next_due", {}).get("date") or {}).get("start", "")[:10]
