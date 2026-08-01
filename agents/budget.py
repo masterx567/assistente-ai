@@ -125,11 +125,24 @@ async def get_monthly_spending() -> dict:
 
 
 async def get_monthly_cashflow() -> dict:
-    """Entrate/uscite/netto del mese corrente (a differenza di get_monthly_spending,
-    che filtra solo le uscite per categoria, qui sommiamo tutti i movimenti)."""
+    """Entrate/uscite/netto dall'ultimo stipendio ricevuto ad oggi (ciclo di pagamento,
+    non mese di calendario — lo stipendio non cade sempre il giorno 1, un taglio a mese
+    fisso spezzerebbe il ciclo reale di spesa a metà). Se non trova nessuno stipendio
+    registrato, fallback sul mese di calendario corrente."""
+    stip_body = {
+        "filter": {"property": "merchant_raw", "rich_text": {"equals": "Stipendio"}},
+        "sorts": [{"property": "date", "direction": "descending"}],
+        "page_size": 1,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=stip_body)
+    stip_results = r.json().get("results", [])
     now = datetime.now()
-    start = f"{now.year}-{now.month:02d}-01"
-    end = f"{now.year}-{now.month:02d}-{_last_day(now.year, now.month):02d}"
+    if stip_results:
+        start = (stip_results[0]["properties"].get("date", {}).get("date") or {}).get("start", "")[:10]
+    else:
+        start = f"{now.year}-{now.month:02d}-01"
+    end = now.strftime("%Y-%m-%d")
     body = {
         "filter": {"and": [
             {"property": "date", "date": {"on_or_after": start}},
@@ -155,14 +168,16 @@ async def get_monthly_cashflow() -> dict:
             if not data.get("has_more"):
                 break
             cursor = data.get("next_cursor")
-    return {"entrate": entrate, "uscite": uscite, "netto": entrate + uscite}
+    return {"entrate": entrate, "uscite": uscite, "netto": entrate + uscite, "dal": start, "al": end}
 
 
 def format_monthly_cashflow(flow: dict) -> str:
     netto = flow["netto"]
     emoji = "🟢" if netto >= 0 else "🔴"
+    dal = date.fromisoformat(flow["dal"]).strftime("%d/%m")
+    al = date.fromisoformat(flow["al"]).strftime("%d/%m")
     return (
-        f"💰 *Flusso di cassa {mese_anno_it(datetime.now())}*\n\n"
+        f"💰 *Flusso di cassa* (dal {dal} — ultimo stipendio — ad oggi {al})\n\n"
         f"⬆️ Entrate: €{flow['entrate']:.2f}\n"
         f"⬇️ Uscite: €{abs(flow['uscite']):.2f}\n"
         f"{emoji} *Netto: €{netto:+.2f}*"
