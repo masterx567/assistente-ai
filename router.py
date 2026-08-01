@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, get_net_worth_trend, get_monthly_cashflow, format_monthly_cashflow
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, reduce_loan, get_net_worth_trend, get_monthly_cashflow, format_monthly_cashflow
 import re as _re
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, get_events_in_range, format_events, add_event, add_multiday_event, delete_event_by_title, rename_event, reschedule_event, search_events
@@ -129,7 +129,7 @@ async def route_message(user_text: str) -> str:
             "• \"mese scorso\" (confronto), \"quanto spenderò\" (proiezione)\n"
             "• \"flusso di cassa\", \"patrimonio\", \"andamento patrimonio\"\n"
             "• \"rate\", \"piano di ammortamento\" (BNPL)\n"
-            "• \"ho prestato 50 a Mario\", \"restituito Mario\", \"prestiti\"\n"
+            "• \"ho prestato 50 a Mario\", \"restituito 300 di Mario\" (parziale), \"restituito Mario\" (saldato), \"prestiti\"\n"
             "• \"ho ricevuto 1500 di stipendio\", \"aggiungi entrata\"\n\n"
             "📅 *Calendario*\n"
             "• \"aggiungi dentista venerdì alle 10\", \"elimina riunione\", \"sposta X a lunedì\"\n"
@@ -564,7 +564,16 @@ async def route_message(user_text: str) -> str:
             if found:
                 return f"✅ Segnato: *{found}*"
 
-    # Prestito restituito
+    # Prestito restituito parzialmente (controlla PRIMA del "restituito <persona>" secco,
+    # altrimenti "restituito 300 di Mario" ci finirebbe dentro leggendo "300" come nome)
+    partial_return_match = _re.search(
+        r"restituito\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s?€?\s*(?:di|da)\s+(\w+)", text_lower)
+    if partial_return_match:
+        amount = float(partial_return_match.group(1).replace(",", "."))
+        person = partial_return_match.group(2)
+        return await reduce_loan(person, amount)
+
+    # Prestito restituito (per intero)
     returned_match = _re.search(r"restituito\s+(\w+)", text_lower)
     if returned_match:
         return await mark_loan_returned(returned_match.group(1))

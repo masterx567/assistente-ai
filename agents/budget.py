@@ -734,6 +734,27 @@ async def check_loan_reminders() -> list[str]:
     return messages
 
 
+async def reduce_loan(person: str, amount: float) -> str:
+    """Riduce un prestito dato di un importo parziale (rimborso non completo).
+    Se l'importo copre o supera il residuo, chiude il prestito (archivia)."""
+    name = f"Prestito a {person.strip().title()}"
+    body = {"filter": {"property": "Name", "title": {"equals": name}}, "page_size": 1}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_ACCOUNTS}/query", headers=HEADERS, json=body)
+    results = r.json().get("results", [])
+    if not results:
+        return f"Nessun prestito trovato per '{person}'."
+    balance = results[0]["properties"].get("balance", {}).get("number") or 0
+    residuo = balance - amount
+    if residuo <= 0:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.patch(f"https://api.notion.com/v1/pages/{results[0]['id']}", headers=HEADERS, json={"archived": True})
+        extra = f" (€{-residuo:.2f} in più del dovuto)" if residuo < 0 else ""
+        return f"✅ *{name}* saldato con questo pagamento{extra}, prestito chiuso."
+    await save_account_balance(name, residuo, "credito")
+    return f"✅ *{name}*: -€{amount:.2f}, residuo €{residuo:.2f}."
+
+
 async def mark_loan_returned(person: str) -> str:
     """Segna un prestito come restituito (archivia l'account)."""
     name = f"Prestito a {person.strip().title()}"
