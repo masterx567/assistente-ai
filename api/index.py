@@ -395,6 +395,26 @@ def portfolio_status():
     return resp
 
 
+BRIEF_SECRET = os.getenv("BRIEF_SECRET")
+
+
+@app.route("/brief", methods=["POST"])
+def brief():
+    """Endpoint esterno per inoltrare un testo (markdown) su Telegram — riusa send_telegram
+    (chunking + parse_mode Markdown + fallback plain già gestiti lì). Protetto da secret,
+    stesso pattern di /api/tick e /api/gym-webhook: query ?secret= o header Authorization: Bearer."""
+    provided = request.args.get("secret") or \
+        request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not BRIEF_SECRET or provided != BRIEF_SECRET:
+        return jsonify({"ok": False}), 403
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "campo 'text' mancante o vuoto"}), 400
+    send_telegram(text)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/tick")
 def tick():
     _require_cron_secret()
