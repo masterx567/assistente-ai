@@ -734,9 +734,9 @@ Testo: {user_text}"""
         r = await client.post(
             GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 300, "temperature": 0},
+                  "max_tokens": 300, "temperature": 0, "reasoning_effort": "low"},
         )
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("[")
@@ -843,9 +843,9 @@ Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 80, "temperature": 0})
+                  "max_tokens": 80, "temperature": 0, "reasoning_effort": "low"})
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("{"); end = raw.rfind("}") + 1
     data = json.loads(raw[start:end])
@@ -864,9 +864,9 @@ Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 60, "temperature": 0})
+                  "max_tokens": 100, "temperature": 0, "reasoning_effort": "low"})
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start_idx = raw.find("{"); end_idx = raw.rfind("}") + 1
     data = json.loads(raw[start_idx:end_idx])
@@ -894,9 +894,9 @@ Testo: {user_text}"""
         r = await client.post(
             GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 20, "temperature": 0},
+                  "max_tokens": 60, "temperature": 0, "reasoning_effort": "low"},
         )
     return r.json()["choices"][0]["message"]["content"].strip().lower()
 
@@ -916,9 +916,9 @@ Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 80, "temperature": 0})
+                  "max_tokens": 80, "temperature": 0, "reasoning_effort": "low"})
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("{"); end_idx = raw.rfind("}") + 1
     data = json.loads(raw[start:end_idx])
@@ -944,9 +944,9 @@ Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 120, "temperature": 0})
+                  "max_tokens": 150, "temperature": 0, "reasoning_effort": "low"})
     raw = r.json()["choices"][0]["message"]["content"].strip()
     start = raw.find("{"); end_idx = raw.rfind("}") + 1
     data = json.loads(raw[start:end_idx])
@@ -975,9 +975,9 @@ Testo: {user_text}"""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 20, "temperature": 0})
+                  "max_tokens": 60, "temperature": 0, "reasoning_effort": "low"})
     return r.json()["choices"][0]["message"]["content"].strip().lower()
 
 
@@ -991,7 +991,7 @@ async def ask_groq(user_text: str, context: str = "") -> str:
         r = await client.post(
             GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "messages": messages, "max_tokens": 500, "temperature": 0.7},
+            json={"model": "openai/gpt-oss-120b", "messages": messages, "max_tokens": 500, "temperature": 0.7, "reasoning_effort": "low"},
         )
         if r.status_code != 200:
             return f"Errore nella risposta ({r.status_code}). Riprova."

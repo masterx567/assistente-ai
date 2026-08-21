@@ -20,7 +20,7 @@ _BNPL_KEYWORDS = ("KLARNA", "SCALAPAY", "PAGA IN 3 RATE", "PAYPAL *PAGA")
 _RE_RATE_COUNT = re.compile(r'IN\s+(\d+)\s+RATE', re.I)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = "openai/gpt-oss-20b"
 
 EB_APP_ID = os.getenv("ENABLE_BANKING_APP_ID", "21fde8fa-b795-4e49-877d-438b309bc065")
 EB_SESSION_ID = os.getenv("ENABLE_BANKING_SESSION_ID")
@@ -131,8 +131,9 @@ async def _groq_categorize(merchant: str) -> str:
             json={
                 "model": GROQ_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 20,
+                "max_tokens": 60,
                 "temperature": 0,
+                "reasoning_effort": "low",
             },
         )
     raw = r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()

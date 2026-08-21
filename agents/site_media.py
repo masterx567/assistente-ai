@@ -135,9 +135,9 @@ corrisponde con sicurezza. Zero altro testo."""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GROQ_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile",
+            json={"model": "openai/gpt-oss-120b",
                   "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 10, "temperature": 0})
+                  "max_tokens": 60, "temperature": 0, "reasoning_effort": "low"})
     raw = r.json()["choices"][0]["message"]["content"].strip().lower()
     m = re.search(r"\d+", raw)
     if not m or "nessuno" in raw:

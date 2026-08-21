@@ -20,7 +20,7 @@ Un unico cron job (`/api/tick`, ogni 5 min) orchestra tutti i job schedulati (br
 ## Stack
 
 - **Runtime**: Flask (WSGI) su Vercel serverless, timeout 10s
-- **LLM**: Groq (`llama-3.3-70b-versatile` per routing/estrazione, `whisper-large-v3-turbo` per trascrizione vocali)
+- **LLM**: Groq (`openai/gpt-oss-120b` per routing/estrazione, `openai/gpt-oss-20b` per categorizzazione, `whisper-large-v3-turbo` per trascrizione vocali)
 - **DB**: Notion (via REST API). Transazioni, categorie, promemoria, errori
 - **Banca**: Enable Banking (standard Berlin Group PSD2) per sync Isybank
 - **Calendario**: Google Calendar API (OAuth2)
