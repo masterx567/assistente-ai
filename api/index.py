@@ -20,8 +20,6 @@ from agents.reminders import get_pending_reminders, mark_sent
 from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
-from agents.piante import CONTAINERS as PLANT_CONTAINERS, get_all_containers, is_due, build_reminder, water_container, get_weather_adjustment
-from agents.gamification import evaluate_week, apply_pending_penalty_fallback, friday_nudge, use_shield, checkin, get_public_status
 from agents.astronomy import get_sky_status_json
 
 app = Flask(__name__)
@@ -34,7 +32,6 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
 CRON_SECRET = os.getenv("CRON_SECRET")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
-GYM_WEBHOOK_SECRET = os.getenv("GYM_WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
@@ -248,19 +245,6 @@ def webhook():
             except Exception as e:
                 result = {"text": f"Errore: {str(e)}"}
             edit_telegram_message(cb_message_id, result["text"], result.get("markup"))
-        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("pw:"):
-            short = cb_data[3:]
-            try:
-                result_text = asyncio.run(water_container(short))
-            except Exception as e:
-                result_text = f"Errore: {str(e)}"
-            edit_telegram_message(cb_message_id, result_text)
-        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data == "gs:shield":
-            try:
-                result_text = asyncio.run(use_shield())
-            except Exception as e:
-                result_text = f"Errore: {str(e)}"
-            edit_telegram_message(cb_message_id, result_text)
         return jsonify({"ok": True})
 
     # Gestione messaggio normale
@@ -320,76 +304,20 @@ def webhook():
     return jsonify({"ok": True})
 
 
-GYM_WALK_KEYWORDS = ("cammin", "walk", "hik", "escursion", "trekking")
-
-
-@app.route("/api/gym-webhook", methods=["POST"])
-def gym_webhook():
-    """Check-in automatico da Health Auto Export (automazione REST API su nuovo allenamento).
-    Body JSON: {"data": {"workouts": [{"name":..., "start":"yyyy-MM-dd HH:mm:ss Z", "duration": secondi, ...}]}}.
-    Prende l'ultimo allenamento dell'array, richiede >=30 min e che sia di oggi.
-    L'app puo' richiamare l'automazione piu' volte/con piu' allenamenti: checkin() e' gia'
-    idempotente 1x/giorno quindi eventuali doppioni sono innocui."""
-    provided = request.args.get("secret") or \
-        request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    if not GYM_WEBHOOK_SECRET or provided != GYM_WEBHOOK_SECRET:
-        return jsonify({"ok": False}), 403
-
-    body = request.get_json(silent=True) or {}
-    workouts = (body.get("data") or {}).get("workouts") or []
-    if not workouts:
-        log_error("gym-webhook: nessun allenamento nel payload", f"body grezzo: {body}", "")
-        return jsonify({"ok": False, "error": "nessun allenamento nel payload"}), 400
-    workout = workouts[-1]
-
-    name_raw = str(workout.get("name", "")).strip().lower()
-    tipo = "camminata" if any(k in name_raw for k in GYM_WALK_KEYWORDS) else "palestra"
-
-    try:
-        minuti = float(workout.get("duration", 0) or 0) / 60
-    except (TypeError, ValueError):
-        minuti = 0
-
-    try:
-        workout_date = datetime.strptime(str(workout.get("start", ""))[:10], "%Y-%m-%d").date()
-    except ValueError:
-        workout_date = datetime.now(ROME).date()
-
-    if workout_date != datetime.now(ROME).date():
-        log_error("gym-webhook: data non odierna", f"workout: {workout}", "")
-        return jsonify({"ok": False, "error": "l'allenamento non è di oggi"}), 400
-    if minuti < 30:
-        log_error("gym-webhook: sotto 30min", f"workout: {workout} (minuti={minuti})", "")
-        return jsonify({"ok": False, "error": "allenamento sotto i 30 minuti, non valido"}), 400
-
-    try:
-        result = asyncio.run(checkin(tipo))
-    except Exception as e:
-        import traceback as tb
-        log_error(str(e), f"gym-webhook tipo_raw={tipo_raw} minuti={minuti}", tb.format_exc())
-        return jsonify({"ok": False, "error": "errore interno"}), 500
-    send_telegram(result["text"], result.get("markup"))
-    return jsonify({"ok": True})
-
-
 PORTFOLIO_ORIGIN = "https://daniele-acunzo.vercel.app"
 
 
 @app.route("/api/portfolio-status")
 def portfolio_status():
     """Endpoint pubblico read-only per il widget 'in diretta' del portfolio.
-    Espone solo dati non sensibili (cielo, gamification palestra) — niente finanze,
+    Espone solo dati non sensibili (cielo) — niente finanze,
     niente contenuti personali. Nessun secret richiesto: e' pensato per essere
     letto direttamente dal browser del portfolio."""
     try:
         sky = asyncio.run(get_sky_status_json())
     except Exception:
         sky = None
-    try:
-        gym = asyncio.run(get_public_status())
-    except Exception:
-        gym = None
-    resp = jsonify({"sky": sky, "gym": gym})
+    resp = jsonify({"sky": sky})
     resp.headers["Access-Control-Allow-Origin"] = PORTFOLIO_ORIGIN
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp
@@ -402,7 +330,7 @@ BRIEF_SECRET = os.getenv("BRIEF_SECRET")
 def brief():
     """Endpoint esterno per inoltrare un testo (markdown) su Telegram — riusa send_telegram
     (chunking + parse_mode Markdown + fallback plain già gestiti lì). Protetto da secret,
-    stesso pattern di /api/tick e /api/gym-webhook: query ?secret= o header Authorization: Bearer."""
+    stesso pattern di /api/tick: query ?secret= o header Authorization: Bearer."""
     provided = request.args.get("secret") or \
         request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not BRIEF_SECRET or provided != BRIEF_SECRET:
@@ -524,41 +452,6 @@ def tick():
                 f"⚠️ *Sync banca Isybank fermo* — sessione Enable Banking scaduta ({result['auth_error']}).\n"
                 f"Serve ri-autorizzare l'accesso alla banca."
             )
-
-    # Reminder irrigazione piante: 8:00 e 20:00 (20:00 ripete se non confermato la mattina)
-    if h in (8, 20) and m <= 4:
-        weather = asyncio.run(get_weather_adjustment())
-        oggi = now.date()
-        by_nome = {c["nome"]: c for c in asyncio.run(get_all_containers())}
-        for short, cfg in PLANT_CONTAINERS.items():
-            container = by_nome.get(cfg["nome"])
-            if not container:
-                continue
-            if is_due(container, oggi, h, weather) and _once(f"water:{short}:{now.date()}:{h}"):
-                reminder = build_reminder(short, container, oggi, weather)
-                send_telegram(reminder["text"], reminder["markup"])
-                done.append(f"water:{short}")
-
-    # Gamification palestra: valutazione settimanale, domenica 21:00
-    if now.weekday() == 6 and h == 21 and m <= 4 and _once(f"gym_week:{now.date()}"):
-        result = asyncio.run(evaluate_week())
-        if result:
-            send_telegram(result["text"], result.get("markup"))
-        done.append("gym_week")
-
-    # Gamification palestra: fallback penalità se lo scudo non è stato usato entro lunedì 23:59
-    if now.weekday() == 0 and h == 23 and m <= 4 and _once(f"gym_penalty_fallback:{now.date()}"):
-        result = asyncio.run(apply_pending_penalty_fallback())
-        if result:
-            send_telegram(result["text"])
-        done.append("gym_penalty_fallback")
-
-    # Gamification palestra: nudge venerdì 20:00 se sei a 1-2/3 questa settimana
-    if now.weekday() == 4 and h == 20 and m <= 4 and _once(f"gym_nudge:{now.date()}"):
-        nudge = asyncio.run(friday_nudge())
-        if nudge:
-            send_telegram(nudge)
-        done.append("gym_nudge")
 
     # Evento astronomico eccezionale stanotte (solo se cielo sereno): 1x/giorno, ore 18
     if h == 18 and m <= 4 and _once(f"astro:{now.date()}"):

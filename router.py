@@ -12,7 +12,6 @@ from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan, find_course_by_name
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
-from agents.piante import water_container, status_report
 from agents.astronomy import get_tonight_sky, get_best_night
 from agents.site_media import start_replace_flow, choose_page, confirm_replace, enable_site_mode, disable_site_mode, is_site_mode_active
 from agents.case import (add_house, update_house_status, list_houses, find_house,
@@ -68,9 +67,6 @@ async def route_message(user_text: str) -> str:
             return "Nessun viaggio salvato al momento."
         items = await get_checklist(trip["id"])
         return {"text": format_checklist(items), "markup": checklist_buttons(items)}
-
-    if text_lower == "/piante":
-        return await status_report()
 
     # Modalità sito: /sito apre la sessione (allegati successivi = sostituzione contenuto
     # sul sito, senza dover ripetere parole chiave), /end la chiude
@@ -142,8 +138,6 @@ async def route_message(user_text: str) -> str:
             "📔 *Diario*: \"diario: ...\" per scrivere, \"diario di luglio\" per rileggere\n\n"
             "🔭 *Cielo*: /cielo (Cormano), /cielo valmalenco (Alpe Ventina), \"cosa vedo stanotte\", "
             "\"fase lunare\", \"prossima serata serena\"\n\n"
-            "🏋️ *Palestra*: \"palestra\" o \"camminata\" (check-in), \"stato palestra\" (scheda XP/livello)\n\n"
-            "🌱 *Piante*: /piante (stato), \"annaffiato fioriera/vaso\"\n\n"
             "📰 *Notizie*: \"notizie\", \"briefing\"\n\n"
             "📦 *Pacchi*: \"traccia pacco <numero> [etichetta]\", \"dove sono i miei pacchi\"\n\n"
             "🏠 *Ricerca casa*: \"aggiungi casa <link/prezzo/via/comune>\", \"casa <via> vista/chiamato/rivista/proposta/scartata\" (aggiornamento rapido), "
@@ -151,30 +145,6 @@ async def route_message(user_text: str) -> str:
             "🌐 *Sito*: /sito (apri modalità, poi manda allegati da sostituire), /end (chiudi)\n\n"
             "\"sì\"/\"no\" per confermare/annullare, /fine annulla qualsiasi flusso in corso."
         )
-
-    # Annaffiato manuale, fuori dal flusso reminder (es. annaffi di tua iniziativa)
-    if "annaffi" in text_lower:
-        if "vaso" in text_lower:
-            return await water_container("v")
-        if "fiorier" in text_lower:
-            return await water_container("f")
-
-    # Stato piante on-demand (senza aspettare il reminder)
-    if text_lower == "piante" or any(kw in text_lower for kw in
-            ("stanno le piante", "stato piante", "stato delle piante", "come sta il basilico")):
-        return await status_report()
-
-    # Gamification palestra/camminata: "stato palestra" PRIMA di "palestra" da sola,
-    # altrimenti il check-in scatterebbe anche quando chiedi solo lo stato
-    if "stato palestra" in text_lower:
-        from agents.gamification import get_status
-        return await get_status()
-    if "palestra" in text_lower:
-        from agents.gamification import checkin
-        return await checkin("palestra")
-    if "camminata" in text_lower:
-        from agents.gamification import checkin
-        return await checkin("camminata")
 
     # Rimuovi prefissi conversazionali per normalizzare il testo prima del routing
     _conv_prefixes = [

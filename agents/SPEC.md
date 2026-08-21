@@ -9,7 +9,7 @@
 
 ## File principali
 ```
-api/index.py     webhook Telegram, tick cron, send_telegram, transcribe_voice, /api/gym-webhook (check-in Shortcuts)
+api/index.py     webhook Telegram, tick cron, send_telegram, transcribe_voice, POST /brief
 router.py        routing msg → handler + prefissi conversazionali stripped
 agents/
   budget.py      transazioni, categorie, budget alert, confronto mese, entrate, spese per periodo
@@ -18,8 +18,6 @@ agents/
   reminders.py   promemoria Notion (salta entry PENDING:)
   pending.py     stato temporaneo conferme (stesso DB Reminders, prefix PENDING:)
   errors.py      log errori su BotErrors DB Notion
-  piante.py      reminder irrigazione (fioriera/vaso), mood/streak, meteo Cormano
-  gamification.py  check-in palestra/camminata, xp/livelli/leghe, loot creature, streak settimanale, scudi
   site_media.py    sostituzione PDF/foto su lineaverdeonline.com (allegato Telegram → WP REST)
   tracking.py      tracking pacchi via 17track.net (stesso DB Reminders, prefix PACCO:)
   case.py          ricerca casa: annunci + stato funnel (stesso DB Reminders, prefix CASA:)
@@ -33,9 +31,6 @@ agents/
 | MerchantMap | `c82a1f2a-a1dc-421b-aeb8-e0fc4e413354` |
 | Reminders + Pending | `38a9d2a5-23ac-8158-badb-f41c332b13e4` |
 | BotErrors | `38b9d2a5-23ac-81f5-935c-c9b665d4330f` |
-| Irrigazione | `41a6389f8060493f80a2976518fd528c` |
-| GymGame (stato: xp/livello/streak/scudi/creature/badge, riga singola) | `ba636571a56e404e927c2b0197506963` |
-| GymCheckins (log check-in) | `fcc6c148fae142a9b142f9c95331d328` |
 
 ## Env vars
 ```
@@ -44,7 +39,6 @@ NOTION_TOKEN  NOTION_DB_TRANSACTIONS  NOTION_DB_CATEGORIES
 GROQ_API_KEY
 GOOGLE_CLIENT_ID  GOOGLE_CLIENT_SECRET  GOOGLE_REFRESH_TOKEN
 GOOGLE_CALENDAR_ICAL_URL
-GYM_WEBHOOK_SECRET   # POST /api/gym-webhook (check-in automatico da Apple Shortcuts)
 WP_APP_USER  WP_APP_PASSWORD   # Application Password WP (wp_16605717) per site_media.py
 TRACK17_API_KEY   # 17track.net, tracking pacchi
 BRIEF_SECRET   # POST /brief, inoltro testo esterno su Telegram
@@ -69,10 +63,6 @@ Finestre: `0<=m<=4` (4 min max 1 fire per evento).
 | 20:00 day_before evento | reminder calendario |
 | 2h/1h prima evento | reminder calendario |
 | remind_at<=now, sent=False | promemoria Notion (salta PENDING:) |
-| h==8 o h==20, 0<=m<=4 | reminder irrigazione (se scaduto, meteo-corretto) |
-| domenica h==21, 0<=m<=4 | valuta settimana palestra (target 3 check-in), offre scudo se fallita |
-| lunedì h==23, 0<=m<=4 | fallback: applica penalità palestra se scudo non usato entro deadline |
-| venerdì h==20, 0<=m<=4 | nudge palestra se sei a 1-2/3 questa settimana |
 | h 8-22, 0<=m<=4 (orario) | check stato pacchi via 17track, notifica solo su cambio stato |
 
 ## Routing (ordine CRITICO — non riordinare)
@@ -101,16 +91,6 @@ Finestre: `0<=m<=4` (4 min max 1 fire per evento).
 4. click bottone → `handle_category_callback(index)` → aggiorna pending → nuova conferma
 
 **Flusso entrata**: stesso pattern con `save_pending("add_income", {...})` → `add_income(source, amount, date)`
-
-## Flusso gamification palestra
-Router: `"stato palestra"` (scheda) controllato PRIMA di `"palestra"`/`"camminata"` (check-in), stesso blocco di `"annaffi"` in cima al router, prima dello strip prefissi conversazionali.
-
-- Check-in (1x/giorno, idempotente via query su GymCheckins): +10xp, roll rarità (60/25/10/4/1% comune/rara/epica/leggendaria/divinità su pool 50 creature), duplicato → +5/+15/+30/+60/+120xp invece della creatura.
-- Livelli: progressivo `100+(N-1)*20` xp/livello, leghe a blocchi di 5 livelli (Bronzo→Leggenda). Delevel possibile se l'xp scende sotto la soglia del livello (`_apply_xp_delta` gestisce salita/discesa a cascata).
-- Target settimanale 3 check-in, valutato domenica 21:00 (`evaluate_week`): fallito + scudi>0 → bottone `gs:shield` (PenaltyPending=True, non applica subito); non cliccato entro lunedì 23:59 → fallback applica -15xp e azzera streak (`apply_pending_penalty_fallback`); scudi guadagnati +1 ogni 5 livelli, max 3.
-- `StreakBrokenRecently` (checkbox) fa comparire un messaggio di rientro non punitivo al check-in successivo a una settimana fallita, poi si resetta. Nessun reward materiale nel rientro (evita l'incentivo perverso a fallire apposta per il bonus).
-
-**Check-in automatico (anti-bugia)**: `POST /api/gym-webhook?secret=GYM_WEBHOOK_SECRET`. Fonte dati: app **Health Auto Export** (automazione REST API su nuovo allenamento) — scartato l'approccio via Apple Shortcuts nativo (property picker troppo inconsistente/fragile su iOS, vedi commit `4db2201` e precedenti per la storia). Body atteso: `{"data":{"workouts":[{"name":...,"start":"yyyy-MM-dd HH:mm:ss Z","duration":<secondi>, ...}]}}` (schema Health Auto Export v2, vedi [wiki ufficiale](https://github.com/Lybron/health-auto-export/wiki/API-Export---JSON-Format)). Prende l'ultimo elemento dell'array `workouts`. Validazione server: `start` deve essere oggi, `duration/60 >= 30` minuti. Rifiuti loggati su BotErrors col workout grezzo per debug.
 
 ## Flusso sostituzione allegati sito (site_media.py)
 0. `/sito` attiva la modalità (`enable_site_mode()`, flag `SITEMODE:ON` su Reminders DB, stesso pattern TICKLOCK di pending.py), `/end` la disattiva e pulisce eventuali pending `site_media_*` a metà. `handle_attachment` si rifiuta ("Manda /sito prima...") se la modalità non è attiva — evita che un allegato mandato per altri motivi finisca dentro il flusso di sostituzione senza bisogno di parole chiave ad ogni messaggio.
@@ -151,3 +131,4 @@ Nessun tick/polling — solo su comando esplicito, entry `CASA:{json}` su Remind
 
 ## TODO aperti (segnalati, non risolti)
 - **`api/evening.py` è codice morto**: manda messaggi Telegram (budget alerts) ma `vercel.json` instrada TUTTO il traffico su `api/index.py` — nessuna route punta a `evening.py`, non è raggiungibile. Da decidere: rianimare come route dedicata, unire la logica in `index.py`, o rimuovere il file. Segnalato 2026-08-02, non toccato.
+- **URGENTE — modelli Groq dismessi**: `llama-3.3-70b-versatile` (router.py, site_media.py) e `llama-3.1-8b-instant` (enable_banking.py, `_groq_categorize`) rispondono entrambi 404 `model_not_found` sulla chiave attuale — rompe TUTTO il fallback chat, l'estrazione transazioni/eventi/promemoria/entrate/case, la categorizzazione automatica delle spese bancarie. Modelli disponibili ora sulla chiave: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b`, `groq/compound`, `groq/compound-mini`, `whisper-large-v3`/`whisper-large-v3-turbo` (questi ultimi due invariati, la trascrizione vocale funziona). Trovato 2026-08-02, non ancora risolto — serve scegliere il modello sostitutivo prima di aggiornare le 9 occorrenze hardcoded.

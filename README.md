@@ -1,6 +1,6 @@
 # AssistenteAI
 
-Bot Telegram personale, full-stack serverless: finanze, calendario, meteo/astronomia, studio, viaggi, palestra (gamification), promemoria. Tutto guidato da linguaggio naturale (testo o vocale), zero comandi da imparare a memoria.
+Bot Telegram personale, full-stack serverless: finanze, calendario, meteo/astronomia, studio, viaggi, promemoria. Tutto guidato da linguaggio naturale (testo o vocale), zero comandi da imparare a memoria.
 
 Risponde solo al chat ID del proprietario (`TELEGRAM_CHAT_ID`): non è un bot pubblico, è un assistente 1:1.
 
@@ -11,11 +11,9 @@ Risponde solo al chat ID del proprietario (`TELEGRAM_CHAT_ID`): non è un bot pu
 - **Cielo & meteo**: previsioni meteo, briefing mattutino, modulo astronomia (fasi lunari, pianeti visibili, eventi eccezionali) su due località, calcolato con effemeridi reali (skyfield/NASA JPL)
 - **Studio**: piano corsi con tracking avanzamento ed esami
 - **Viaggi**: checklist con progress bar, spese di viaggio
-- **Palestra**: check-in automatico (via Health Auto Export), XP/livelli/leghe, streak settimanale con scudi
 - **Promemoria**: one-off o ricorrenti, gestiti via Notion
 - **Pacchi**: tracking spedizioni (17track), avviso automatico su cambio stato ("in consegna", "consegnato")
 - **Ricerca casa**: annunci tracciati con link/prezzo/via/comune, funnel di stato (nuova → chiamato → vista → rivista → proposta / scartata)
-- **Piante**: reminder irrigazione meteo-corretto
 
 Un unico cron job (`/api/tick`, ogni 5 min) orchestra tutti i job schedulati (briefing, reminder, riepiloghi, check meteo/astro).
 
@@ -23,7 +21,7 @@ Un unico cron job (`/api/tick`, ogni 5 min) orchestra tutti i job schedulati (br
 
 - **Runtime**: Flask (WSGI) su Vercel serverless, timeout 10s
 - **LLM**: Groq (`llama-3.3-70b-versatile` per routing/estrazione, `whisper-large-v3-turbo` per trascrizione vocali)
-- **DB**: Notion (via REST API). Transazioni, categorie, promemoria, errori, stato gamification
+- **DB**: Notion (via REST API). Transazioni, categorie, promemoria, errori
 - **Banca**: Enable Banking (standard Berlin Group PSD2) per sync Isybank
 - **Calendario**: Google Calendar API (OAuth2)
 - **Meteo/Astro**: wttr.in, skyfield (effemeridi JPL)
@@ -34,7 +32,7 @@ Un unico cron job (`/api/tick`, ogni 5 min) orchestra tutti i job schedulati (br
 ```
 api/index.py     webhook Telegram + cron tick + invio messaggi/grafici
 router.py        instrada ogni messaggio all'handler giusto (ordine keyword critico)
-agents/          budget, calendar, news, reminders, studio, travel, piante, gamification, astronomy, errors...
+agents/          budget, calendar, news, reminders, studio, travel, astronomy, errors...
 agents/SPEC.md   specifica tecnica completa (DB IDs, routing, bug noti, flussi di conferma)
 ```
 
@@ -62,8 +60,6 @@ Niente sintassi rigida, il router matcha keyword/frasi libere (vedi `router.py` 
 | Cielo (Alpe Ventina) | `/cielo valmalenco` |
 | Prossima serata serena | "prossima serata serena" |
 | Diario | "diario: giornata storta oggi", "diario di luglio" |
-| Palestra | "palestra", "camminata" (check-in), "stato palestra" (scheda XP/livello) |
-| Piante | `/piante`, "annaffiato vaso" |
 | Notizie | "notizie", "briefing" |
 | Pacchi | "traccia pacco \<numero\> \<etichetta\>", "dove sono i miei pacchi" |
 | Ricerca casa | "aggiungi casa \<link/prezzo/via/comune\>", "casa \<via\> vista/chiamato/rivista/proposta/scartata", `/listacase` |
@@ -79,7 +75,6 @@ TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, WEBHOOK_SECRET, CRON_SECRET
 NOTION_TOKEN, NOTION_DB_TRANSACTIONS, NOTION_DB_CATEGORIES
 GROQ_API_KEY
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
-GYM_WEBHOOK_SECRET
 TRACK17_API_KEY
 BRIEF_SECRET
 ```
