@@ -47,7 +47,13 @@ GOOGLE_CALENDAR_ICAL_URL
 GYM_WEBHOOK_SECRET   # POST /api/gym-webhook (check-in automatico da Apple Shortcuts)
 WP_APP_USER  WP_APP_PASSWORD   # Application Password WP (wp_16605717) per site_media.py
 TRACK17_API_KEY   # 17track.net, tracking pacchi
+BRIEF_SECRET   # POST /brief, inoltro testo esterno su Telegram
 ```
+
+## Endpoint esterni
+| Route | Auth | Uso |
+|---|---|---|
+| `POST /brief` | `?secret=` o `Authorization: Bearer` = `BRIEF_SECRET` | Body JSON `{"text": "..."}`, inoltra su Telegram riusando `send_telegram()` (chunking + Markdown + fallback plain). Per automazioni esterne che vogliono mandare un messaggio senza passare da Telegram direttamente. |
 
 ## Cron
 Un solo job su cron-job.org: `GET /api/tick` ogni 5 min.
@@ -142,3 +148,6 @@ Nessun tick/polling — solo su comando esplicito, entry `CASA:{json}` su Remind
 - `_find_active_commitment` matchava con `name.startswith(merchant)`: la banca manda lo stesso piano BNPL con testo leggermente diverso tra una rata e l'altra (asterischi, suffissi tipo ".co" che vanno e vengono), match rigido falliva → piano duplicato per la stessa spesa. Fix: confronto normalizzato solo-alfanumerico, sottostringa in entrambe le direzioni (`_merchant_key`).
 - `get_monthly_cashflow` calcolava sul mese di calendario (1° - ultimo giorno): lo stipendio non cade sempre il giorno 1 (es. arrivato l'8/07), quindi un mese fisso tagliava il ciclio di spesa reale a metà. Fix: periodo ancorato all'ultimo `merchant_raw == "Stipendio"` trovato in Transactions, fino ad oggi (fallback su mese calendario se nessuno stipendio trovato).
 - `get_monthly_cashflow` somma TUTTE le transazioni incluse le `Bonifico Uscita` (bonifici istantanei auto-iniziati, es. verso Fineco): il testo remittance della banca per questi bonifici viene generalizzato a "Bonifico Uscita"/categoria "Altro" in `_extract_merchant` (righe 91-92), il vero destinatario non è mai salvato — nessun modo automatico di distinguere un trasferimento verso un conto proprio da un pagamento reale. Daniele segnala manualmente quando serve escludere un bonifico specifico dal calcolo (nessuna categoria/flag dedicata implementata, 2026-08-01).
+
+## TODO aperti (segnalati, non risolti)
+- **`api/evening.py` è codice morto**: manda messaggi Telegram (budget alerts) ma `vercel.json` instrada TUTTO il traffico su `api/index.py` — nessuna route punta a `evening.py`, non è raggiungibile. Da decidere: rianimare come route dedicata, unire la logica in `index.py`, o rimuovere il file. Segnalato 2026-08-02, non toccato.

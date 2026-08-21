@@ -81,7 +81,10 @@ GROQ_API_KEY
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
 GYM_WEBHOOK_SECRET
 TRACK17_API_KEY
+BRIEF_SECRET
 ```
+
+`POST /brief` (body `{"text": "..."}`, auth `?secret=` o `Authorization: Bearer` = `BRIEF_SECRET`) inoltra un testo su Telegram — pensato per automazioni esterne.
 
 Deploy su Vercel (build automatico da `vercel.json`), webhook Telegram puntato su `/api/webhook`, cron esterno (es. cron-job.org) che chiama `/api/tick` ogni 5 minuti.
 
