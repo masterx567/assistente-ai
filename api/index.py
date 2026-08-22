@@ -1,6 +1,7 @@
 import os
 import asyncio
 import json
+import base64
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
@@ -106,6 +107,26 @@ def send_telegram_photo(photo_bytes: bytes, caption: str = ""):
         if not r.json().get("ok"):
             c.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
                    files={"photo": ("chart.png", photo_bytes, "image/png")})
+
+
+def send_telegram_document(doc_bytes: bytes, filename: str, caption: str = ""):
+    """Manda un documento (es. PDF) con didascalia. Stesso pattern di send_telegram_photo:
+    caption oltre 1024 char va come documento senza caption + messaggio testo a parte."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
+    if len(caption) > 1024:
+        with httpx.Client(timeout=30) as c:
+            c.post(url, data={"chat_id": TELEGRAM_CHAT_ID}, files={"document": (filename, doc_bytes, "application/pdf")})
+        send_telegram(caption)
+        return
+    with httpx.Client(timeout=30) as c:
+        r = c.post(
+            url,
+            data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"},
+            files={"document": (filename, doc_bytes, "application/pdf")},
+        )
+        if not r.json().get("ok"):
+            c.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                   files={"document": (filename, doc_bytes, "application/pdf")})
 
 
 def transcribe_voice(file_id: str, filename: str = "voice.ogg") -> str | None:
@@ -340,6 +361,28 @@ def brief():
     if not text:
         return jsonify({"ok": False, "error": "campo 'text' mancante o vuoto"}), 400
     send_telegram(text)
+    return jsonify({"ok": True})
+
+
+@app.route("/brief-file", methods=["POST"])
+def brief_file():
+    """Endpoint esterno per inoltrare un file (es. PDF) su Telegram — riusa send_telegram_document.
+    Stesso auth di /brief (BRIEF_SECRET). Body JSON: {"filename": "...", "file_base64": "...", "caption": "..."}."""
+    provided = request.args.get("secret") or \
+        request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not BRIEF_SECRET or provided != BRIEF_SECRET:
+        return jsonify({"ok": False}), 403
+    data = request.get_json(silent=True) or {}
+    filename = data.get("filename", "").strip()
+    file_b64 = data.get("file_base64", "")
+    caption = data.get("caption", "")
+    if not filename or not file_b64:
+        return jsonify({"ok": False, "error": "campi 'filename' e 'file_base64' obbligatori"}), 400
+    try:
+        doc_bytes = base64.b64decode(file_b64)
+    except Exception:
+        return jsonify({"ok": False, "error": "file_base64 non decodificabile"}), 400
+    send_telegram_document(doc_bytes, filename, caption)
     return jsonify({"ok": True})
 
 
