@@ -582,9 +582,15 @@ async def save_account_balance(name: str, balance: float, acc_type: str) -> None
 
 
 async def add_loan(person: str, amount: float) -> str:
-    """Registra un prestito dato a una persona (conta positivo nel patrimonio)."""
+    """Registra un prestito dato a una persona (conta positivo nel patrimonio).
+    Se esiste già un prestito per quella persona, somma al residuo invece di sovrascriverlo."""
     name = f"Prestito a {person.strip().title()}"
-    await save_account_balance(name, amount, "credito")
+    existing = await get_account_info(name)
+    previous = existing["balance"] if existing else 0
+    total = previous + amount
+    await save_account_balance(name, total, "credito")
+    if previous:
+        return f"✅ Registrato: *{name}* +€{amount:.2f} — totale €{total:.2f}"
     return f"✅ Registrato: *{name}* — €{amount:.2f}"
 
 
