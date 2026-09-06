@@ -537,7 +537,8 @@ async def route_message(user_text: str) -> str:
     # Prestito restituito parzialmente (controlla PRIMA del "restituito <persona>" secco,
     # altrimenti "restituito 300 di Mario" ci finirebbe dentro leggendo "300" come nome)
     partial_return_match = _re.search(
-        r"restituito\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s?€?\s*(?:di|da)\s+(\w+)", text_lower)
+        r"restituito\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s*(?:€|euro|eur)?\s*"
+        r"(?:di|da)\s+(?:mio|mia|il|lo|la)?\s*(\w+)", text_lower)
     if partial_return_match:
         amount = float(partial_return_match.group(1).replace(",", "."))
         person = partial_return_match.group(2)
@@ -549,7 +550,9 @@ async def route_message(user_text: str) -> str:
         return await mark_loan_returned(returned_match.group(1))
 
     # Prestiti dati a persone
-    loan_match = _re.search(r"(?:ho prestato|prestato|presto)\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s?€?\s*(?:a|per)\s+(\w+)", text_lower)
+    loan_match = _re.search(
+        r"(?:ho prestato|prestato|presto)\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s*(?:€|euro|eur)?\s*"
+        r"(?:a|ad|per)\s+(?:mio|mia|il|lo|la)?\s*(\w+)", text_lower)
     if loan_match:
         amount = float(loan_match.group(1).replace(",", "."))
         person = loan_match.group(2)
