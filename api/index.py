@@ -2,7 +2,7 @@ import os
 import asyncio
 import json
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
@@ -34,6 +34,30 @@ GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
 CRON_SECRET = os.getenv("CRON_SECRET")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
+
+
+@app.route("/api/eb-auth-revolut-start")
+def eb_auth_revolut_start():
+    """TEMPORANEO: avvia il consenso Enable Banking per Revolut (setup multi-conto).
+    Da rimuovere dopo l'uso — stesso pattern usato per il setup iniziale di Isybank."""
+    _require_cron_secret()
+    from agents.enable_banking import _eb_headers, EB_API
+    r = httpx.get(f"{EB_API}/aspsps", params={"country": "IT"}, headers=_eb_headers(), timeout=15)
+    aspsps = r.json().get("aspsps", [])
+    matches = [a for a in aspsps if "revolut" in a.get("name", "").lower()]
+    if len(matches) != 1:
+        return jsonify({"ok": False, "matches": matches, "hint": "0 o >1 match, scegli il nome esatto e riprova"})
+    aspsp_name = matches[0]["name"]
+    valid_until = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    body = {
+        "aspsp": {"name": aspsp_name, "country": "IT"},
+        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
+        "state": "revolut-setup",
+        "psu_type": "personal",
+        "access": {"valid_until": valid_until},
+    }
+    r2 = httpx.post(f"{EB_API}/auth", json=body, headers=_eb_headers(), timeout=15)
+    return jsonify(r2.json())
 
 
 def _require_cron_secret():
