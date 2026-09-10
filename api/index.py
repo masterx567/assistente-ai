@@ -36,68 +36,6 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
-@app.route("/api/eb-aspsp-debug")
-def eb_aspsp_debug():
-    """TEMPORANEO: dump completo dell'entry ASPSP Revolut (max_consent_validity, ecc.)
-    per capire perché /auth da' invalid_request. Da rimuovere dopo l'uso."""
-    _require_cron_secret()
-    from agents.enable_banking import _eb_headers, EB_API
-    r = httpx.get(f"{EB_API}/aspsps", params={"country": "IT"}, headers=_eb_headers(), timeout=15)
-    aspsps = r.json().get("aspsps", [])
-    matches = [a for a in aspsps if "revolut" in a.get("name", "").lower()]
-    return jsonify(matches)
-
-
-@app.route("/api/eb-auth-revolut-start")
-def eb_auth_revolut_start():
-    """TEMPORANEO: avvia il consenso Enable Banking per Revolut (setup multi-conto).
-    Da rimuovere dopo l'uso — stesso pattern usato per il setup iniziale di Isybank."""
-    _require_cron_secret()
-    from agents.enable_banking import _eb_headers, EB_API
-    r = httpx.get(f"{EB_API}/aspsps", params={"country": "IT"}, headers=_eb_headers(), timeout=15)
-    aspsps = r.json().get("aspsps", [])
-    matches = [a for a in aspsps if "revolut" in a.get("name", "").lower()]
-    if len(matches) != 1:
-        return jsonify({"ok": False, "matches": matches, "hint": "0 o >1 match, scegli il nome esatto e riprova"})
-    aspsp_name = matches[0]["name"]
-    valid_until = (datetime.now(timezone.utc) + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    body = {
-        "aspsp": {"name": aspsp_name, "country": "IT"},
-        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
-        "state": "revolut-setup",
-        "psu_type": "personal",
-        "access": {"valid_until": valid_until, "balances": True, "transactions": True},
-    }
-    r2 = httpx.post(f"{EB_API}/auth", json=body, headers=_eb_headers(), timeout=15)
-    return jsonify(r2.json())
-
-
-@app.route("/api/eb-auth-revolut-finish")
-def eb_auth_revolut_finish():
-    """TEMPORANEO: scambia il code del redirect per una sessione attiva + elenco conti.
-    Da rimuovere dopo l'uso."""
-    _require_cron_secret()
-    code = request.args.get("code", "")
-    if not code:
-        return jsonify({"ok": False, "error": "manca ?code="}), 400
-    from agents.enable_banking import _eb_headers, EB_API
-    r = httpx.post(f"{EB_API}/sessions", json={"code": code}, headers=_eb_headers(), timeout=15)
-    return jsonify(r.json())
-
-
-@app.route("/api/eb-session-check")
-def eb_session_check():
-    """TEMPORANEO: rifetch di una sessione esistente (GET /sessions/{id}) per vedere se
-    gli account si sono popolati dopo un ritardo di propagazione. Da rimuovere dopo l'uso."""
-    _require_cron_secret()
-    session_id = request.args.get("session_id", "")
-    if not session_id:
-        return jsonify({"ok": False, "error": "manca ?session_id="}), 400
-    from agents.enable_banking import _eb_headers, EB_API
-    r = httpx.get(f"{EB_API}/sessions/{session_id}", headers=_eb_headers(), timeout=15)
-    return jsonify(r.json())
-
-
 def _require_cron_secret():
     from flask import abort
     if not CRON_SECRET:
