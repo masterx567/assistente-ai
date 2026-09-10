@@ -36,6 +36,18 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
+@app.route("/api/eb-aspsp-debug")
+def eb_aspsp_debug():
+    """TEMPORANEO: dump completo dell'entry ASPSP Revolut (max_consent_validity, ecc.)
+    per capire perché /auth da' invalid_request. Da rimuovere dopo l'uso."""
+    _require_cron_secret()
+    from agents.enable_banking import _eb_headers, EB_API
+    r = httpx.get(f"{EB_API}/aspsps", params={"country": "IT"}, headers=_eb_headers(), timeout=15)
+    aspsps = r.json().get("aspsps", [])
+    matches = [a for a in aspsps if "revolut" in a.get("name", "").lower()]
+    return jsonify(matches)
+
+
 @app.route("/api/eb-auth-revolut-start")
 def eb_auth_revolut_start():
     """TEMPORANEO: avvia il consenso Enable Banking per Revolut (setup multi-conto).
