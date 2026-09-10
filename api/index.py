@@ -47,6 +47,31 @@ def eb_sync_test():
     return jsonify(result)
 
 
+@app.route("/api/eb-raw-fetch")
+def eb_raw_fetch():
+    """TEMPORANEO: fetch grezzo transazioni (no save) per ispezionare entry_reference
+    e capire perche' sync_transactions le segna 'skipped'. Da rimuovere dopo l'uso."""
+    _require_cron_secret()
+    account = request.args.get("account", "Revolut")
+    days = int(request.args.get("days", "90"))
+    from agents.enable_banking import _fetch_transactions, _tx_exists, EB_ACCOUNT_UID, EB_REVOLUT_ACCOUNT_UID, EB_SESSION_ID, EB_REVOLUT_SESSION_ID
+    account_uid = EB_ACCOUNT_UID if account == "Isybank" else EB_REVOLUT_ACCOUNT_UID
+    session_id = EB_SESSION_ID if account == "Isybank" else EB_REVOLUT_SESSION_ID
+    txs = asyncio.run(_fetch_transactions(account_uid, session_id, days))
+    sample = []
+    for tx in txs[:10]:
+        entry_ref = tx.get("entry_reference", "")
+        exists = asyncio.run(_tx_exists(entry_ref)) if entry_ref else None
+        sample.append({
+            "entry_reference": entry_ref,
+            "already_exists_in_notion": exists,
+            "amount": tx.get("transaction_amount", {}).get("amount"),
+            "date": tx.get("booking_date"),
+            "remittance": (tx.get("remittance_information") or [""])[0][:60],
+        })
+    return jsonify({"total_fetched": len(txs), "sample": sample})
+
+
 @app.route("/api/eb-aspsp-debug")
 def eb_aspsp_debug():
     """TEMPORANEO: dump completo dell'entry ASPSP Revolut (max_consent_validity, ecc.)
