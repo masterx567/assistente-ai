@@ -36,6 +36,16 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
+@app.route("/api/eb-sync-test")
+def eb_sync_test():
+    """TEMPORANEO: simula esattamente cosa fa il tick delle 8/20 su entrambi i conti,
+    per verificare il refactor multi-conto prima del prossimo tick reale. Da rimuovere."""
+    _require_cron_secret()
+    iso = asyncio.run(sync_transactions(days_back=3, account="Isybank"))
+    rev = asyncio.run(sync_transactions(days_back=3, account="Revolut"))
+    return jsonify({"isybank": iso, "revolut": rev})
+
+
 def _require_cron_secret():
     from flask import abort
     if not CRON_SECRET:
