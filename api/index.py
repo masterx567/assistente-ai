@@ -60,6 +60,19 @@ def eb_auth_revolut_start():
     return jsonify(r2.json())
 
 
+@app.route("/api/eb-auth-revolut-finish")
+def eb_auth_revolut_finish():
+    """TEMPORANEO: scambia il code del redirect per una sessione attiva + elenco conti.
+    Da rimuovere dopo l'uso."""
+    _require_cron_secret()
+    code = request.args.get("code", "")
+    if not code:
+        return jsonify({"ok": False, "error": "manca ?code="}), 400
+    from agents.enable_banking import _eb_headers, EB_API
+    r = httpx.post(f"{EB_API}/sessions", json={"code": code}, headers=_eb_headers(), timeout=15)
+    return jsonify(r.json())
+
+
 def _require_cron_secret():
     from flask import abort
     if not CRON_SECRET:
