@@ -85,6 +85,8 @@ async def _get_spending(year: int, month: int) -> dict:
         amount = props.get("amount", {}).get("number", 0) or 0
         cat_rel = props.get("category", {}).get("relation", [])
         cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
+        if cat_name == "Trasferimento":
+            continue
         spending[cat_name] = spending.get(cat_name, 0) + abs(amount)
     return spending
 
@@ -138,7 +140,10 @@ async def _get_stipendio_dates(n: int) -> list[str]:
 
 
 async def _sum_cashflow_range(start: str, end: str) -> dict:
-    """Entrate/uscite/netto per un range di date [start, end] inclusivo."""
+    """Entrate/uscite/netto per un range di date [start, end] inclusivo.
+    Esclude i trasferimenti interni (PAC Fineco, top-up Revolut) — non sono
+    consumo ne' reddito, sono soldi spostati verso conti/investimenti propri."""
+    cat_names = await _get_all_category_names()
     body = {
         "filter": {"and": [
             {"property": "date", "date": {"on_or_after": start}},
@@ -156,6 +161,10 @@ async def _sum_cashflow_range(start: str, end: str) -> dict:
             r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
             data = r.json()
             for page in data.get("results", []):
+                cat_rel = page["properties"].get("category", {}).get("relation", [])
+                cat_name = cat_names.get(cat_rel[0]["id"], "") if cat_rel else ""
+                if cat_name == "Trasferimento":
+                    continue
                 amt = page["properties"].get("amount", {}).get("number") or 0
                 if amt > 0:
                     entrate += amt
@@ -307,6 +316,8 @@ async def get_weekly_spending() -> dict:
         amount = props.get("amount", {}).get("number", 0) or 0
         cat_rel = props.get("category", {}).get("relation", [])
         cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
+        if cat_name == "Trasferimento":
+            continue
         spending[cat_name] = spending.get(cat_name, 0) + abs(amount)
     return spending
 
@@ -509,6 +520,8 @@ async def _get_transactions_since(days_back: int) -> list[dict]:
         merchant = mr[0]["plain_text"] if mr else "?"
         cat_rel = props.get("category", {}).get("relation", [])
         cat_name = cat_names.get(cat_rel[0]["id"], "Senza categoria") if cat_rel else "Senza categoria"
+        if cat_name == "Trasferimento":
+            continue
         if date_str:
             results.append({"merchant": merchant, "amount": amount, "date": date_str, "category": cat_name})
     return results

@@ -206,6 +206,52 @@ async def _tx_exists(entry_ref: str) -> bool:
     return len(r.json().get("results", [])) > 0
 
 
+# ── Trasferimenti interni (PAC Fineco + top-up Revolut) ────────────────────────
+# Isybank e' diventato un conto di passaggio: arriva lo stipendio, ~550€ (±50)
+# restano per il PAC Fineco, il resto va su Revolut (conto spesa quotidiana).
+# Nessuno dei due e' consumo reale, quindi vanno tolti dalle categorie di spesa
+# e dal flusso di cassa — altrimenti ogni mese risulterebbe "speso" quasi tutto
+# lo stipendio anche se in realta' e' solo spostato altrove.
+_TRASFERIMENTO_MIN = 500.0
+_TRASFERIMENTO_MAX = 600.0
+
+
+async def _get_last_stipendio_amount() -> tuple[float, str] | None:
+    body = {
+        "filter": {"property": "merchant_raw", "rich_text": {"equals": "Stipendio"}},
+        "sorts": [{"property": "date", "direction": "descending"}],
+        "page_size": 1,
+    }
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=NOTION_HEADERS, json=body)
+    results = r.json().get("results", [])
+    if not results:
+        return None
+    props = results[0]["properties"]
+    amount = props.get("amount", {}).get("number") or 0
+    date_iso = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+    return (amount, date_iso) if date_iso else None
+
+
+def _is_internal_transfer(amount_abs: float, booking_date: str, last_stipendio: tuple[float, str] | None) -> bool:
+    """True se l'importo di un 'Bonifico Uscita' rientra nel range PAC (500-600) oppure
+    nel range del top-up Revolut (stipendio - [500,600]), entro 10gg dallo stipendio."""
+    if _TRASFERIMENTO_MIN <= amount_abs <= _TRASFERIMENTO_MAX:
+        return True
+    if last_stipendio:
+        stip_amount, stip_date = last_stipendio
+        expected_min = stip_amount - _TRASFERIMENTO_MAX
+        expected_max = stip_amount - _TRASFERIMENTO_MIN
+        if expected_min <= amount_abs <= expected_max:
+            try:
+                diff = abs((date.fromisoformat(booking_date) - date.fromisoformat(stip_date)).days)
+            except ValueError:
+                diff = 999
+            if diff <= 10:
+                return True
+    return False
+
+
 async def _tx_save(tx: dict, merchant: str, category_id: str | None) -> None:
     amount_raw = float(tx["transaction_amount"]["amount"])
     amount = -amount_raw if tx.get("credit_debit_indicator") == "DBIT" else amount_raw
@@ -390,6 +436,7 @@ async def sync_transactions(days_back: int = 3) -> dict:
         result = {"fetched": 0, "saved": 0, "skipped": 0, "error": "No transactions or missing config"}
     else:
         cats = await _get_categories()  # {name: page_id}
+        last_stipendio = await _get_last_stipendio_amount()
         saved = skipped = 0
 
         for tx in txs:
@@ -406,6 +453,13 @@ async def sync_transactions(days_back: int = 3) -> dict:
                 amount = abs(float(tx["transaction_amount"]["amount"]))
                 await _upsert_bnpl_commitment(merchant, amount, tx["booking_date"], rem[0])
                 forced_cat = forced_cat or "Shopping"
+
+            # Trasferimento interno (PAC Fineco / top-up Revolut): non e' consumo,
+            # va escluso dalle categorie di spesa e dal flusso di cassa
+            if merchant == "Bonifico Uscita":
+                amount_abs = abs(float(tx["transaction_amount"]["amount"]))
+                if _is_internal_transfer(amount_abs, tx["booking_date"], last_stipendio):
+                    forced_cat = "Trasferimento"
 
             # Resolve category
             category_id: str | None = None
