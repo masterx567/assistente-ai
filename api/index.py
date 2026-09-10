@@ -85,6 +85,19 @@ def eb_auth_revolut_finish():
     return jsonify(r.json())
 
 
+@app.route("/api/eb-session-check")
+def eb_session_check():
+    """TEMPORANEO: rifetch di una sessione esistente (GET /sessions/{id}) per vedere se
+    gli account si sono popolati dopo un ritardo di propagazione. Da rimuovere dopo l'uso."""
+    _require_cron_secret()
+    session_id = request.args.get("session_id", "")
+    if not session_id:
+        return jsonify({"ok": False, "error": "manca ?session_id="}), 400
+    from agents.enable_banking import _eb_headers, EB_API
+    r = httpx.get(f"{EB_API}/sessions/{session_id}", headers=_eb_headers(), timeout=15)
+    return jsonify(r.json())
+
+
 def _require_cron_secret():
     from flask import abort
     if not CRON_SECRET:
