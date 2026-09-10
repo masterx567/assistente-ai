@@ -3,7 +3,7 @@ import os
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, reduce_loan, get_net_worth_trend, get_monthly_cashflow, format_monthly_cashflow
+from agents.budget import get_monthly_spending, get_budget_alerts, format_spending_summary, format_alerts, get_recent_transactions, get_category_budgets, get_monthly_comparison, get_remaining_budget, get_transactions_by_period, add_income, get_amortization_table, save_account_balance, get_net_worth, add_loan, get_loans, get_month_projection, mark_loan_returned, reduce_loan, get_net_worth_trend, get_monthly_cashflow, format_monthly_cashflow, get_cashflow_periods, format_cashflow_periods
 import re as _re
 from agents.news import get_morning_briefing
 from agents.calendar import get_events, get_events_in_range, format_events, add_event, add_multiday_event, delete_event_by_title, rename_event, reschedule_event, search_events
@@ -123,7 +123,7 @@ async def route_message(user_text: str) -> str:
             "• \"quanto ho speso\", \"budget\", \"ultime spese\"\n"
             "• \"quanto mi rimane in <categoria>\"\n"
             "• \"mese scorso\" (confronto), \"quanto spenderò\" (proiezione)\n"
-            "• \"flusso di cassa\", \"patrimonio\", \"andamento patrimonio\"\n"
+            "• \"flusso di cassa\", \"ultimi 3 flussi di cassa\" (storico), \"patrimonio\", \"andamento patrimonio\"\n"
             "• \"rate\", \"piano di ammortamento\" (BNPL)\n"
             "• \"ho prestato 50 a Mario\", \"restituito 300 di Mario\" (parziale), \"restituito Mario\" (saldato), \"prestiti\"\n"
             "• \"ho ricevuto 1500 di stipendio\", \"aggiungi entrata\"\n\n"
@@ -435,6 +435,14 @@ async def route_message(user_text: str) -> str:
     # Previsione fine mese
     if any(w in text_lower for w in ["previsione fine mese", "quanto spenderò", "proiezione spesa", "proiezione fine mese", "quanto spendero"]):
         return await get_month_projection()
+
+    # Flussi di cassa multipli: controllato PRIMA del singolo, "ultimi 3 flussi"/"flussi" plurale
+    # non deve far scattare il ramo singolare (entrambi contengono "flusso di cassa" come substring)
+    if any(w in text_lower for w in ["flussi di cassa", "ultimi flussi", "storico flusso di cassa", "confronto flussi di cassa", "ultimi cashflow"]):
+        _n_match = _re.search(r"ultim[ei]\s+(\d+)", text_lower)
+        n = int(_n_match.group(1)) if _n_match else 3
+        periods = await get_cashflow_periods(n)
+        return format_cashflow_periods(periods)
 
     # Flusso di cassa mensile: entrate/uscite/netto (diverso da patrimonio, che è cumulativo)
     if any(w in text_lower for w in ["flusso di cassa", "entrate e uscite", "entrate uscite", "quanto ho guadagnato", "quanto ho risparmiato", "bilancio del mese", "bilancio mese", "netto del mese", "cashflow"]):

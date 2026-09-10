@@ -124,25 +124,21 @@ async def get_monthly_spending() -> dict:
     return await _get_spending(now.year, now.month)
 
 
-async def get_monthly_cashflow() -> dict:
-    """Entrate/uscite/netto dall'ultimo stipendio ricevuto ad oggi (ciclo di pagamento,
-    non mese di calendario — lo stipendio non cade sempre il giorno 1, un taglio a mese
-    fisso spezzerebbe il ciclo reale di spesa a metà). Se non trova nessuno stipendio
-    registrato, fallback sul mese di calendario corrente."""
+async def _get_stipendio_dates(n: int) -> list[str]:
+    """Ultime n date di stipendio trovate (merchant_raw == 'Stipendio'), più recente prima."""
     stip_body = {
         "filter": {"property": "merchant_raw", "rich_text": {"equals": "Stipendio"}},
         "sorts": [{"property": "date", "direction": "descending"}],
-        "page_size": 1,
+        "page_size": n,
     }
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=stip_body)
-    stip_results = r.json().get("results", [])
-    now = datetime.now()
-    if stip_results:
-        start = (stip_results[0]["properties"].get("date", {}).get("date") or {}).get("start", "")[:10]
-    else:
-        start = f"{now.year}-{now.month:02d}-01"
-    end = now.strftime("%Y-%m-%d")
+    results = r.json().get("results", [])
+    return [(p["properties"].get("date", {}).get("date") or {}).get("start", "")[:10] for p in results]
+
+
+async def _sum_cashflow_range(start: str, end: str) -> dict:
+    """Entrate/uscite/netto per un range di date [start, end] inclusivo."""
     body = {
         "filter": {"and": [
             {"property": "date", "date": {"on_or_after": start}},
@@ -171,6 +167,18 @@ async def get_monthly_cashflow() -> dict:
     return {"entrate": entrate, "uscite": uscite, "netto": entrate + uscite, "dal": start, "al": end}
 
 
+async def get_monthly_cashflow() -> dict:
+    """Entrate/uscite/netto dall'ultimo stipendio ricevuto ad oggi (ciclo di pagamento,
+    non mese di calendario — lo stipendio non cade sempre il giorno 1, un taglio a mese
+    fisso spezzerebbe il ciclo reale di spesa a metà). Se non trova nessuno stipendio
+    registrato, fallback sul mese di calendario corrente."""
+    now = datetime.now()
+    dates = await _get_stipendio_dates(1)
+    start = dates[0] if dates else f"{now.year}-{now.month:02d}-01"
+    end = now.strftime("%Y-%m-%d")
+    return await _sum_cashflow_range(start, end)
+
+
 def format_monthly_cashflow(flow: dict) -> str:
     netto = flow["netto"]
     emoji = "🟢" if netto >= 0 else "🔴"
@@ -182,6 +190,43 @@ def format_monthly_cashflow(flow: dict) -> str:
         f"⬇️ Uscite: €{abs(flow['uscite']):.2f}\n"
         f"{emoji} *Netto: €{netto:+.2f}*"
     )
+
+
+async def get_cashflow_periods(n: int = 3) -> list[dict]:
+    """Ultimi n flussi di cassa, un ciclo stipendio-stipendio ciascuno (più recente prima).
+    Periodo 1 = ultimo stipendio -> oggi (aperto). Periodo k = stipendio[k-1] -> stipendio[k-2] (escluso).
+    Se in Transactions ci sono meno di n stipendi, ritorna solo i periodi ricostruibili."""
+    now = datetime.now()
+    dates = await _get_stipendio_dates(n)
+    if not dates:
+        return [await _sum_cashflow_range(f"{now.year}-{now.month:02d}-01", now.strftime("%Y-%m-%d"))]
+
+    periods = []
+    today_str = now.strftime("%Y-%m-%d")
+    for i, start in enumerate(dates):
+        if i == 0:
+            end = today_str
+        else:
+            prev_start = date.fromisoformat(dates[i - 1])
+            end = (prev_start - timedelta(days=1)).strftime("%Y-%m-%d")
+        periods.append(await _sum_cashflow_range(start, end))
+    return periods
+
+
+def format_cashflow_periods(periods: list[dict]) -> str:
+    if not periods:
+        return "💰 Nessun flusso di cassa disponibile."
+    lines = ["💰 *Ultimi flussi di cassa*\n"]
+    for flow in periods:
+        netto = flow["netto"]
+        emoji = "🟢" if netto >= 0 else "🔴"
+        dal = date.fromisoformat(flow["dal"]).strftime("%d/%m")
+        al = date.fromisoformat(flow["al"]).strftime("%d/%m")
+        lines.append(
+            f"{emoji} *{dal} — {al}*: entrate €{flow['entrate']:.2f}, "
+            f"uscite €{abs(flow['uscite']):.2f}, netto €{netto:+.2f}"
+        )
+    return "\n".join(lines)
 
 
 async def get_budget_alerts() -> list[dict]:
