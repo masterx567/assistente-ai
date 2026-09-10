@@ -66,7 +66,7 @@ def eb_auth_revolut_start():
         "redirect_url": "https://assistente-ai-three.vercel.app/callback",
         "state": "revolut-setup",
         "psu_type": "personal",
-        "access": {"valid_until": valid_until},
+        "access": {"valid_until": valid_until, "balances": True, "transactions": True},
     }
     r2 = httpx.post(f"{EB_API}/auth", json=body, headers=_eb_headers(), timeout=15)
     return jsonify(r2.json())
