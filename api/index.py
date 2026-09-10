@@ -36,6 +36,17 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
+@app.route("/api/eb-sync-test")
+def eb_sync_test():
+    """TEMPORANEO: trigger manuale di sync_transactions per test (chiave privata EB
+    esiste solo su Vercel, non testabile in locale). Da rimuovere dopo l'uso."""
+    _require_cron_secret()
+    account = request.args.get("account", "Revolut")
+    days = int(request.args.get("days", "90"))
+    result = asyncio.run(sync_transactions(days_back=days, account=account))
+    return jsonify(result)
+
+
 @app.route("/api/eb-aspsp-debug")
 def eb_aspsp_debug():
     """TEMPORANEO: dump completo dell'entry ASPSP Revolut (max_consent_validity, ecc.)
@@ -550,12 +561,20 @@ def tick():
     # Sync banca Enable Banking: 2x/giorno (08:00, 20:00) — ridotto da ogni 2h per stare
     # sotto la quota giornaliera ASPSP (rate limit scoperto il 03/07)
     if h in (8, 20) and m <= 4:
-        result = asyncio.run(sync_transactions(days_back=3))
+        result = asyncio.run(sync_transactions(days_back=3, account="Isybank"))
         done.append(f"bank_sync:{result.get('saved', 0)}saved")
         if result.get("auth_error") and _once(f"eb_auth_error:{now.date()}"):
             send_telegram(
                 f"⚠️ *Sync banca Isybank fermo* — sessione Enable Banking scaduta ({result['auth_error']}).\n"
                 f"Serve ri-autorizzare l'accesso alla banca."
+            )
+
+        revolut_result = asyncio.run(sync_transactions(days_back=3, account="Revolut"))
+        done.append(f"bank_sync_revolut:{revolut_result.get('saved', 0)}saved")
+        if revolut_result.get("auth_error") and _once(f"eb_auth_error_revolut:{now.date()}"):
+            send_telegram(
+                f"⚠️ *Sync banca Revolut fermo* — sessione Enable Banking scaduta ({revolut_result['auth_error']}).\n"
+                f"Serve ri-autorizzare l'accesso al conto Revolut."
             )
 
     # Evento astronomico eccezionale stanotte (solo se cielo sereno): 1x/giorno, ore 18

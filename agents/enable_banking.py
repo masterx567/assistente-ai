@@ -26,6 +26,8 @@ EB_APP_ID = os.getenv("ENABLE_BANKING_APP_ID", "21fde8fa-b795-4e49-877d-438b309b
 EB_SESSION_ID = os.getenv("ENABLE_BANKING_SESSION_ID")
 EB_SESSION_EXPIRY = os.getenv("ENABLE_BANKING_SESSION_EXPIRY", "2026-09-28")
 EB_ACCOUNT_UID = os.getenv("ENABLE_BANKING_ACCOUNT_UID", "b070e7ad-96ff-416c-9d09-566fb5c23ca2")
+EB_REVOLUT_SESSION_ID = os.getenv("ENABLE_BANKING_REVOLUT_SESSION_ID")
+EB_REVOLUT_ACCOUNT_UID = os.getenv("ENABLE_BANKING_REVOLUT_ACCOUNT_UID")
 _RAW_KEY = os.getenv("ENABLE_BANKING_PRIVATE_KEY", "")
 EB_PRIVATE_KEY = _RAW_KEY.replace("\\n", "\n") if _RAW_KEY else None
 
@@ -233,26 +235,31 @@ async def _get_last_stipendio_amount() -> tuple[float, str] | None:
     return (amount, date_iso) if date_iso else None
 
 
-def _is_internal_transfer(amount_abs: float, booking_date: str, last_stipendio: tuple[float, str] | None) -> bool:
-    """True se l'importo di un 'Bonifico Uscita' rientra nel range PAC (500-600) oppure
-    nel range del top-up Revolut (stipendio - [500,600]), entro 10gg dallo stipendio."""
-    if _TRASFERIMENTO_MIN <= amount_abs <= _TRASFERIMENTO_MAX:
-        return True
-    if last_stipendio:
-        stip_amount, stip_date = last_stipendio
-        expected_min = stip_amount - _TRASFERIMENTO_MAX
-        expected_max = stip_amount - _TRASFERIMENTO_MIN
-        if expected_min <= amount_abs <= expected_max:
-            try:
-                diff = abs((date.fromisoformat(booking_date) - date.fromisoformat(stip_date)).days)
-            except ValueError:
-                diff = 999
-            if diff <= 10:
-                return True
-    return False
+def _is_pac_transfer(amount_abs: float) -> bool:
+    """True se l'importo rientra nel range del PAC Fineco (500-600). Solo lato Isybank
+    (debito) — il PAC non tocca mai Revolut."""
+    return _TRASFERIMENTO_MIN <= amount_abs <= _TRASFERIMENTO_MAX
 
 
-async def _tx_save(tx: dict, merchant: str, category_id: str | None) -> None:
+def _is_revolut_topup(amount_abs: float, booking_date: str, last_stipendio: tuple[float, str] | None) -> bool:
+    """True se l'importo rientra nel range del top-up Revolut (stipendio - [500,600]),
+    entro 10gg dallo stipendio. Vale sia per l'uscita Isybank sia per l'entrata Revolut —
+    stesso importo, direzione diversa."""
+    if not last_stipendio:
+        return False
+    stip_amount, stip_date = last_stipendio
+    expected_min = stip_amount - _TRASFERIMENTO_MAX
+    expected_max = stip_amount - _TRASFERIMENTO_MIN
+    if not (expected_min <= amount_abs <= expected_max):
+        return False
+    try:
+        diff = abs((date.fromisoformat(booking_date) - date.fromisoformat(stip_date)).days)
+    except ValueError:
+        return False
+    return diff <= 10
+
+
+async def _tx_save(tx: dict, merchant: str, category_id: str | None, account: str = "Isybank") -> None:
     amount_raw = float(tx["transaction_amount"]["amount"])
     amount = -amount_raw if tx.get("credit_debit_indicator") == "DBIT" else amount_raw
     tx_type = "income" if amount > 0 else "expense"
@@ -265,6 +272,7 @@ async def _tx_save(tx: dict, merchant: str, category_id: str | None) -> None:
         "date": {"date": {"start": tx["booking_date"]}},
         "type": {"select": {"name": tx_type}},
         "source": {"select": {"name": "api"}},
+        "account": {"select": {"name": account}},
         "merchant_raw": {"rich_text": [{"text": {"content": merchant[:200]}}]},
         "entry_reference": {"rich_text": [{"text": {"content": tx.get("entry_reference", "")[:200]}}]},
         "merchant_normalized": {"rich_text": [{"text": {"content": merchant[:200]}}]},
@@ -366,12 +374,18 @@ async def _upsert_bnpl_commitment(merchant: str, amount: float, booking_date: st
 # ── Enable Banking fetch ──────────────────────────────────────────────────────
 
 async def _sum_synced_since(since_date: str) -> float:
-    """Somma le transazioni sincronizzate (source=api) con date > since_date.
-    Usata per aggiornare il saldo senza chiamare l'endpoint /balances (rate-limited)."""
+    """Somma le transazioni Isybank sincronizzate (source=api) con date > since_date.
+    Usata per aggiornare il saldo senza chiamare l'endpoint /balances (rate-limited).
+    account is_empty incluso per compatibilita' con le righe sincronizzate prima
+    dell'introduzione del multi-conto (erano tutte Isybank)."""
     body = {
         "filter": {"and": [
             {"property": "source", "select": {"equals": "api"}},
             {"property": "date", "date": {"after": since_date}},
+            {"or": [
+                {"property": "account", "select": {"equals": "Isybank"}},
+                {"property": "account", "select": {"is_empty": True}},
+            ]},
         ]},
         "page_size": 100,
     }
@@ -392,8 +406,8 @@ class EBAuthError(Exception):
     """Sessione/consenso Enable Banking non più valido (serve ri-autorizzare)."""
 
 
-async def _fetch_transactions(days_back: int = 3) -> list[dict]:
-    if not EB_SESSION_ID or not EB_PRIVATE_KEY:
+async def _fetch_transactions(account_uid: str, session_id: str | None, days_back: int = 3) -> list[dict]:
+    if not session_id or not EB_PRIVATE_KEY:
         return []
     date_from = (datetime.now(timezone.utc) - timedelta(days=days_back)).date().isoformat()
     params = {"date_from": date_from}
@@ -401,7 +415,7 @@ async def _fetch_transactions(days_back: int = 3) -> list[dict]:
     async with httpx.AsyncClient(timeout=30) as c:
         while True:
             r = await c.get(
-                f"{EB_API}/accounts/{EB_ACCOUNT_UID}/transactions",
+                f"{EB_API}/accounts/{account_uid}/transactions",
                 params=params,
                 headers=_eb_headers(),
             )
@@ -421,14 +435,16 @@ async def _fetch_transactions(days_back: int = 3) -> list[dict]:
 
 # ── Main sync ─────────────────────────────────────────────────────────────────
 
-async def sync_transactions(days_back: int = 3) -> dict:
-    """Full pipeline: fetch → dedup → categorize → save transazioni, poi ricalcola
-    il saldo Isybank sommando i movimenti sincronizzati dall'ancora fissa (niente
-    chiamate a /balances, che va in rate limit su Isybank)."""
-    from agents.budget import save_account_balance
+async def sync_transactions(days_back: int = 3, account: str = "Isybank") -> dict:
+    """Full pipeline: fetch → dedup → categorize → save transazioni per un conto
+    ("Isybank" o "Revolut"). Solo Isybank ricalcola il saldo dall'ancora fissa
+    (niente chiamate a /balances, che va in rate limit) — Revolut non ha saldo tracciato,
+    serve solo per le transazioni (vista combinata budget/flusso di cassa)."""
+    account_uid = EB_ACCOUNT_UID if account == "Isybank" else EB_REVOLUT_ACCOUNT_UID
+    session_id = EB_SESSION_ID if account == "Isybank" else EB_REVOLUT_SESSION_ID
 
     try:
-        txs = await _fetch_transactions(days_back)
+        txs = await _fetch_transactions(account_uid, session_id, days_back)
     except EBAuthError as e:
         return {"fetched": 0, "saved": 0, "skipped": 0, "auth_error": str(e)}
 
@@ -455,10 +471,16 @@ async def sync_transactions(days_back: int = 3) -> dict:
                 forced_cat = forced_cat or "Shopping"
 
             # Trasferimento interno (PAC Fineco / top-up Revolut): non e' consumo,
-            # va escluso dalle categorie di spesa e dal flusso di cassa
-            if merchant == "Bonifico Uscita":
-                amount_abs = abs(float(tx["transaction_amount"]["amount"]))
-                if _is_internal_transfer(amount_abs, tx["booking_date"], last_stipendio):
+            # va escluso dalle categorie di spesa e dal flusso di cassa. Lato Isybank
+            # e' un'uscita "Bonifico Uscita" (PAC o top-up), lato Revolut e' l'entrata
+            # corrispondente del top-up — stesso importo, direzione opposta.
+            amount_abs = abs(float(tx["transaction_amount"]["amount"]))
+            is_credit = tx.get("credit_debit_indicator") != "DBIT"
+            if account == "Isybank" and merchant == "Bonifico Uscita":
+                if _is_pac_transfer(amount_abs) or _is_revolut_topup(amount_abs, tx["booking_date"], last_stipendio):
+                    forced_cat = "Trasferimento"
+            elif account == "Revolut" and is_credit:
+                if _is_revolut_topup(amount_abs, tx["booking_date"], last_stipendio):
                     forced_cat = "Trasferimento"
 
             # Resolve category
@@ -473,14 +495,16 @@ async def sync_transactions(days_back: int = 3) -> dict:
                     if category_id:
                         await _merchant_create(merchant, category_id)
 
-            await _tx_save(tx, merchant, category_id)
+            await _tx_save(tx, merchant, category_id, account=account)
             saved += 1
 
         result = {"fetched": len(txs), "saved": saved, "skipped": skipped}
 
-    delta = await _sum_synced_since(ISYBANK_ANCHOR_DATE)
-    await save_account_balance("Isybank", ISYBANK_ANCHOR_BALANCE + delta, "bank")
-    result["balance_synced"] = True
+    if account == "Isybank":
+        from agents.budget import save_account_balance
+        delta = await _sum_synced_since(ISYBANK_ANCHOR_DATE)
+        await save_account_balance("Isybank", ISYBANK_ANCHOR_BALANCE + delta, "bank")
+        result["balance_synced"] = True
     return result
 
 
