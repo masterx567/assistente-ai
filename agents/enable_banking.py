@@ -339,7 +339,12 @@ async def _upsert_bnpl_commitment(merchant: str, amount: float, booking_date: st
     next_due = (date.fromisoformat(booking_date) + timedelta(days=30)).isoformat()
 
     if existing:
-        new_remaining = max(0.0, existing["remaining"] - amount)
+        new_remaining = existing["remaining"] - amount
+        # Sotto i 5 centesimi e' un residuo di arrotondamento tra rate non perfettamente
+        # uguali (es. ultima rata 28.65 su un piano di 85.98/3=28.66...), non un debito
+        # vero — senza il clamp restava "attivo" con importi tipo "rata 4/3".
+        if new_remaining < 0.05:
+            new_remaining = 0.0
         props = {
             "amount_remaining": {"number": new_remaining},
             "monthly_installment": {"number": amount},
