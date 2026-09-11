@@ -323,25 +323,42 @@ async def get_weekly_spending() -> dict:
 
 
 async def get_recent_transactions(limit: int = 10) -> list[dict]:
-    """Ultime N transazioni (uscite) ordinate per data."""
-    body = {"filter": {"property": "amount", "number": {"less_than": 0}},
-            "sorts": [{"property": "date", "direction": "descending"}],
-            "page_size": limit}
+    """Ultime N transazioni (uscite) ordinate per data, esclusi i trasferimenti interni
+    (PAC/top-up Revolut) — non sono spesa reale."""
+    cat_names = await _get_all_category_names()
+    results: list[dict] = []
+    cursor = None
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
-    results = []
-    for t in r.json().get("results", [])[:limit]:
-        props = t["properties"]
-        amount = props.get("amount", {}).get("number", 0) or 0
-        date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
-        mr = props.get("merchant_raw", {}).get("rich_text", [])
-        mn = props.get("merchant_normalized", {}).get("rich_text", [])
-        title_parts = props.get("Name", {}).get("title", [])
-        name = (mr[0]["plain_text"] if mr else
-                mn[0]["plain_text"] if mn else
-                title_parts[0]["plain_text"] if title_parts else "?")
-        results.append({"name": name, "amount": abs(amount), "date": date_str})
-    return results
+        while len(results) < limit:
+            body = {"filter": {"property": "amount", "number": {"less_than": 0}},
+                    "sorts": [{"property": "date", "direction": "descending"}],
+                    "page_size": limit}
+            if cursor:
+                body["start_cursor"] = cursor
+            r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+            data = r.json()
+            page_results = data.get("results", [])
+            for t in page_results:
+                props = t["properties"]
+                cat_rel = props.get("category", {}).get("relation", [])
+                cat_name = cat_names.get(cat_rel[0]["id"], "") if cat_rel else ""
+                if cat_name == "Trasferimento":
+                    continue
+                amount = props.get("amount", {}).get("number", 0) or 0
+                date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+                mr = props.get("merchant_raw", {}).get("rich_text", [])
+                mn = props.get("merchant_normalized", {}).get("rich_text", [])
+                title_parts = props.get("Name", {}).get("title", [])
+                name = (mr[0]["plain_text"] if mr else
+                        mn[0]["plain_text"] if mn else
+                        title_parts[0]["plain_text"] if title_parts else "?")
+                results.append({"name": name, "amount": abs(amount), "date": date_str})
+                if len(results) >= limit:
+                    break
+            if not data.get("has_more") or not page_results:
+                break
+            cursor = data.get("next_cursor")
+    return results[:limit]
 
 
 def generate_spending_chart(spending: dict, title: str) -> bytes | None:
@@ -444,30 +461,46 @@ async def get_transactions_by_period(period: str, limit: int = 20) -> list[dict]
             start = date(now.year, now.month, 1)
             end = today
 
-    body = {
-        "filter": {"and": [
-            {"property": "date", "date": {"on_or_after": start.isoformat()}},
-            {"property": "date", "date": {"on_or_before": end.isoformat()}},
-            {"property": "amount", "number": {"less_than": 0}},
-        ]},
-        "sorts": [{"property": "date", "direction": "descending"}],
-        "page_size": limit,
-    }
+    cat_names = await _get_all_category_names()
+    results: list[dict] = []
+    cursor = None
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query",
-            headers=HEADERS, json=body
-        )
-    results = []
-    for t in r.json().get("results", [])[:limit]:
-        props = t["properties"]
-        amount = props.get("amount", {}).get("number", 0) or 0
-        date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
-        mr = props.get("merchant_raw", {}).get("rich_text", [])
-        title_parts = props.get("Name", {}).get("title", [])
-        name = mr[0]["plain_text"] if mr else (title_parts[0]["plain_text"] if title_parts else "?")
-        results.append({"name": name, "amount": abs(amount), "date": date_str})
-    return results, start, end
+        while len(results) < limit:
+            body = {
+                "filter": {"and": [
+                    {"property": "date", "date": {"on_or_after": start.isoformat()}},
+                    {"property": "date", "date": {"on_or_before": end.isoformat()}},
+                    {"property": "amount", "number": {"less_than": 0}},
+                ]},
+                "sorts": [{"property": "date", "direction": "descending"}],
+                "page_size": limit,
+            }
+            if cursor:
+                body["start_cursor"] = cursor
+            r = await client.post(
+                f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query",
+                headers=HEADERS, json=body
+            )
+            data = r.json()
+            page_results = data.get("results", [])
+            for t in page_results:
+                props = t["properties"]
+                cat_rel = props.get("category", {}).get("relation", [])
+                cat_name = cat_names.get(cat_rel[0]["id"], "") if cat_rel else ""
+                if cat_name == "Trasferimento":
+                    continue
+                amount = props.get("amount", {}).get("number", 0) or 0
+                date_str = (props.get("date", {}).get("date") or {}).get("start", "")[:10]
+                mr = props.get("merchant_raw", {}).get("rich_text", [])
+                title_parts = props.get("Name", {}).get("title", [])
+                name = mr[0]["plain_text"] if mr else (title_parts[0]["plain_text"] if title_parts else "?")
+                results.append({"name": name, "amount": abs(amount), "date": date_str})
+                if len(results) >= limit:
+                    break
+            if not data.get("has_more") or not page_results:
+                break
+            cursor = data.get("next_cursor")
+    return results[:limit], start, end
 
 
 async def add_income(source: str, amount: float, date_str: str = None) -> str:
