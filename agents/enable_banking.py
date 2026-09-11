@@ -505,6 +505,21 @@ async def sync_transactions(days_back: int = 3, account: str = "Isybank") -> dic
         delta = await _sum_synced_since(ISYBANK_ANCHOR_DATE)
         await save_account_balance("Isybank", ISYBANK_ANCHOR_BALANCE + delta, "bank")
         result["balance_synced"] = True
+    elif account == "Revolut" and account_uid:
+        # Niente rate limit su questo endpoint (a differenza di Isybank) — lettura diretta,
+        # non serve il workaround dell'ancora fissa.
+        from agents.budget import save_account_balance
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get(f"{EB_API}/accounts/{account_uid}/balances", headers=_eb_headers())
+            if r.status_code == 200:
+                balances = r.json().get("balances", [])
+                if balances:
+                    amount = float(balances[0]["balance_amount"]["amount"])
+                    await save_account_balance("Revolut", amount, "bank")
+                    result["balance_synced"] = True
+        except Exception:
+            pass
     return result
 
 

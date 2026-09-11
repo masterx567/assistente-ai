@@ -36,14 +36,13 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
-@app.route("/api/eb-balance-test")
-def eb_balance_test():
-    """TEMPORANEO: test lettura saldo Revolut via Enable Banking (endpoint diverso da
-    Isybank, verifico se e' rate-limited anche qui). Da rimuovere dopo l'uso."""
+@app.route("/api/eb-sync-test")
+def eb_sync_test():
+    """TEMPORANEO: verifica che il saldo Revolut venga salvato dentro sync_transactions.
+    Da rimuovere dopo l'uso."""
     _require_cron_secret()
-    from agents.enable_banking import _eb_headers, EB_API, EB_REVOLUT_ACCOUNT_UID
-    r = httpx.get(f"{EB_API}/accounts/{EB_REVOLUT_ACCOUNT_UID}/balances", headers=_eb_headers(), timeout=15)
-    return jsonify({"status": r.status_code, "body": r.json() if r.status_code == 200 else r.text[:500]})
+    result = asyncio.run(sync_transactions(days_back=3, account="Revolut"))
+    return jsonify(result)
 
 
 def _require_cron_secret():
