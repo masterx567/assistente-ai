@@ -36,13 +36,6 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
-@app.route("/api/eb-sync-test")
-def eb_sync_test():
-    """TEMPORANEO: verifica che il saldo Revolut venga salvato dentro sync_transactions.
-    Da rimuovere dopo l'uso."""
-    _require_cron_secret()
-    result = asyncio.run(sync_transactions(days_back=3, account="Revolut"))
-    return jsonify(result)
 
 
 def _require_cron_secret():
