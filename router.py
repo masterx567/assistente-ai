@@ -125,7 +125,7 @@ async def route_message(user_text: str) -> str:
             "• \"mese scorso\" (confronto), \"quanto spenderò\" (proiezione)\n"
             "• \"flusso di cassa\", \"ultimi 3 flussi di cassa\" (storico), \"patrimonio\", \"andamento patrimonio\"\n"
             "• \"rate\", \"piano di ammortamento\" (BNPL)\n"
-            "• \"ho prestato 50 a Mario\", \"restituito 300 di Mario\" (parziale), \"restituito Mario\" (saldato), \"prestiti\"\n"
+            "• \"ho prestato 50 a Mario\" / \"prestito 50 a Mario\", \"restituito 300 di Mario\" (parziale), \"restituito Mario\" (saldato), \"prestiti\"\n"
             "• \"ho ricevuto 1500 di stipendio\", \"aggiungi entrata\"\n\n"
             "📅 *Calendario*\n"
             "• \"aggiungi dentista venerdì alle 10\", \"elimina riunione\", \"sposta X a lunedì\"\n"
@@ -558,13 +558,20 @@ async def route_message(user_text: str) -> str:
         return await mark_loan_returned(returned_match.group(1))
 
     # Prestiti dati a persone
+    # Accetta sia il verbo ("ho prestato 120 a Chris") sia il sostantivo ("prestito 120 a Chris",
+    # "prestito a Chris di 120"): prima "prestito" non matchava e il messaggio non creava il credito.
     loan_match = _re.search(
-        r"(?:ho prestato|prestato|presto)\s+(?:€\s?)?(\d+(?:[.,]\d+)?)\s*(?:€|euro|eur)?\s*"
+        r"(?:ho prestato|prestato|presto|prestito)\s+(?:di\s+)?(?:€\s?)?(\d+(?:[.,]\d+)?)\s*(?:€|euro|eur)?\s*"
         r"(?:a|ad|per)\s+(?:mio|mia|il|lo|la)?\s*(\w+)", text_lower)
-    if loan_match:
-        amount = float(loan_match.group(1).replace(",", "."))
-        person = loan_match.group(2)
-        return await add_loan(person, amount)
+    loan_match_rev = None if loan_match else _re.search(
+        r"(?:ho prestato|prestato|presto|prestito)\s+(?:a|ad|per)\s+(?:mio|mia|il|lo|la)?\s*([a-zà-ù]+)\s+"
+        r"(?:di\s+)?(?:€\s?)?(\d+(?:[.,]\d+)?)", text_lower)
+    if loan_match or loan_match_rev:
+        if loan_match:
+            amount, person = loan_match.group(1), loan_match.group(2)
+        else:
+            person, amount = loan_match_rev.group(1), loan_match_rev.group(2)
+        return await add_loan(person, float(amount.replace(",", ".")))
     if any(w in text_lower for w in ["prestiti", "chi mi deve", "prestiti dati", "prestiti attivi"]):
         return await get_loans()
 
