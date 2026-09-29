@@ -680,9 +680,52 @@ async def add_loan(person: str, amount: float) -> str:
     previous = existing["balance"] if existing else 0
     total = previous + amount
     await save_account_balance(name, total, "credito")
+    moved = await _reclassify_loan_outflow(person, amount)
+    extra = f"\n↪️ Uscita del {moved} spostata in *Trasferimento* (non conta come spesa)." if moved else ""
     if previous:
-        return f"✅ Registrato: *{name}* +€{amount:.2f} — totale €{total:.2f}"
-    return f"✅ Registrato: *{name}* — €{amount:.2f}"
+        return f"✅ Registrato: *{name}* +€{amount:.2f} — totale €{total:.2f}{extra}"
+    return f"✅ Registrato: *{name}* — €{amount:.2f}{extra}"
+
+
+async def _reclassify_loan_outflow(person: str, amount: float, days_back: int = 10) -> str | None:
+    """Il prestito esce dal conto come una normale uscita (es. Bancomat Pay "Verso CHRISTIAN ..."),
+    che la sync categorizza come spesa (Shopping/Altro) gonfiando il budget. Cerca l'uscita
+    di pari importo negli ultimi N giorni e la sposta in "Trasferimento". A parità di importo
+    preferisce quella con il nome della persona nelle note. Ritorna la data dell'uscita spostata."""
+    cat_names = await _get_all_category_names()
+    transfer_id = next((cid for cid, n in cat_names.items() if n == "Trasferimento"), None)
+    if not transfer_id:
+        return None
+    start = (date.today() - timedelta(days=days_back)).isoformat()
+    body = {
+        "filter": {"and": [
+            {"property": "date", "date": {"on_or_after": start}},
+            {"property": "amount", "number": {"equals": -abs(amount)}},
+        ]},
+        "sorts": [{"property": "date", "direction": "descending"}],
+        "page_size": 20,
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"https://api.notion.com/v1/databases/{DB_TRANSACTIONS}/query", headers=HEADERS, json=body)
+    candidates = []
+    for t in r.json().get("results", []):
+        props = t["properties"]
+        cat_rel = props.get("category", {}).get("relation", [])
+        if cat_rel and cat_rel[0]["id"] == transfer_id:
+            continue
+        notes = "".join(p.get("plain_text", "") for p in props.get("notes", {}).get("rich_text", []))
+        candidates.append((person.strip().lower() in notes.lower(), t))
+    if not candidates:
+        return None
+    # Con il nome nelle note vince sempre; senza, solo se l'uscita è unica (evita falsi positivi)
+    named = [t for has_name, t in candidates if has_name]
+    target = named[0] if named else (candidates[0][1] if len(candidates) == 1 else None)
+    if not target:
+        return None
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.patch(f"https://api.notion.com/v1/pages/{target['id']}", headers=HEADERS,
+                           json={"properties": {"category": {"relation": [{"id": transfer_id}]}}})
+    return ((target["properties"].get("date", {}).get("date") or {}).get("start", "") or "")[:10]
 
 
 async def get_loans() -> str:
