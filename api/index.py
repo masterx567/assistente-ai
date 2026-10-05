@@ -36,48 +36,11 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
-@app.route("/api/eb-reauth-start")
-def eb_reauth_start():
-    """TEMPORANEO: rinnova il consenso Enable Banking (?bank=isybank|revolut). La chiave
-    privata EB esiste solo su Vercel. Da rimuovere dopo l'uso."""
+@app.route("/api/eb-sync-test")
+def eb_sync_test():
+    """TEMPORANEO: verifica sync Isybank dopo il rinnovo consenso. Da rimuovere."""
     _require_cron_secret()
-    from agents.enable_banking import _eb_headers, EB_API
-    bank = request.args.get("bank", "isybank").lower()
-    r = httpx.get(f"{EB_API}/aspsps", params={"country": "IT"}, headers=_eb_headers(), timeout=15)
-    matches = [a for a in r.json().get("aspsps", []) if bank in a.get("name", "").lower()]
-    if len(matches) != 1:
-        return jsonify({"ok": False, "matches": [m.get("name") for m in matches]})
-    aspsp = matches[0]
-    max_secs = aspsp.get("maximum_consent_validity") or 90 * 86400
-    secs = min(max_secs, 90 * 86400) - 3600
-    valid_until = (datetime.now(timezone.utc) + timedelta(seconds=secs)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    body = {
-        "aspsp": {"name": aspsp["name"], "country": "IT"},
-        "redirect_url": "https://assistente-ai-three.vercel.app/callback",
-        "state": f"{bank}-reauth",
-        "psu_type": "personal",
-        "access": {"valid_until": valid_until, "balances": True, "transactions": True},
-    }
-    r2 = httpx.post(f"{EB_API}/auth", json=body, headers=_eb_headers(), timeout=15)
-    return jsonify(r2.json())
-
-
-@app.route("/api/eb-reauth-finish")
-def eb_reauth_finish():
-    """TEMPORANEO: scambia il code per la sessione. Da rimuovere dopo l'uso."""
-    _require_cron_secret()
-    code = request.args.get("code", "")
-    if not code:
-        return jsonify({"ok": False, "error": "manca ?code="}), 400
-    from agents.enable_banking import _eb_headers, EB_API
-    r = httpx.post(f"{EB_API}/sessions", json={"code": code}, headers=_eb_headers(), timeout=15)
-    data = r.json()
-    return jsonify({
-        "session_id": data.get("session_id"),
-        "valid_until": (data.get("access") or {}).get("valid_until"),
-        "accounts": [{"uid": a.get("uid"), "iban": (a.get("account_id") or {}).get("iban"), "currency": a.get("currency")} for a in data.get("accounts", [])],
-        "error": data.get("error"),
-    })
+    return jsonify(asyncio.run(sync_transactions(days_back=10, account="Isybank")))
 
 
 def _require_cron_secret():
