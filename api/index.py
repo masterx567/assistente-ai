@@ -36,13 +36,6 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 ROME = ZoneInfo("Europe/Rome")
 
 
-@app.route("/api/eb-sync-test")
-def eb_sync_test():
-    """TEMPORANEO: verifica sync Isybank dopo il rinnovo consenso. Da rimuovere."""
-    _require_cron_secret()
-    return jsonify(asyncio.run(sync_transactions(days_back=10, account="Isybank")))
-
-
 def _require_cron_secret():
     from flask import abort
     if not CRON_SECRET:
