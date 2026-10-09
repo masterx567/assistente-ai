@@ -22,10 +22,10 @@ _RE_RATE_COUNT = re.compile(r'IN\s+(\d+)\s+RATE', re.I)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = "openai/gpt-oss-20b"
 
-EB_APP_ID = os.getenv("ENABLE_BANKING_APP_ID", "21fde8fa-b795-4e49-877d-438b309bc065")
+EB_APP_ID = os.getenv("ENABLE_BANKING_APP_ID")
 EB_SESSION_ID = os.getenv("ENABLE_BANKING_SESSION_ID")
 EB_SESSION_EXPIRY = os.getenv("ENABLE_BANKING_SESSION_EXPIRY", "2026-09-28")
-EB_ACCOUNT_UID = os.getenv("ENABLE_BANKING_ACCOUNT_UID", "b070e7ad-96ff-416c-9d09-566fb5c23ca2")
+EB_ACCOUNT_UID = os.getenv("ENABLE_BANKING_ACCOUNT_UID")
 EB_REVOLUT_SESSION_ID = os.getenv("ENABLE_BANKING_REVOLUT_SESSION_ID")
 EB_REVOLUT_ACCOUNT_UID = os.getenv("ENABLE_BANKING_REVOLUT_ACCOUNT_UID")
 _RAW_KEY = os.getenv("ENABLE_BANKING_PRIVATE_KEY", "")
@@ -412,7 +412,7 @@ class EBAuthError(Exception):
 
 
 async def _fetch_transactions(account_uid: str, session_id: str | None, days_back: int = 3) -> list[dict]:
-    if not session_id or not EB_PRIVATE_KEY:
+    if not account_uid or not session_id or not EB_PRIVATE_KEY:
         return []
     date_from = (datetime.now(timezone.utc) - timedelta(days=days_back)).date().isoformat()
     params = {"date_from": date_from}
