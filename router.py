@@ -32,7 +32,10 @@ Puoi fare queste cose:
 - Gestire eventi del calendario (mostrare, aggiungere, eliminare)
 - Rispondere a domande generali
 
-Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggibile per Telegram (usa *grassetto* e • per liste).
+Quando ricevi dati strutturati (spese, alert), formattali in modo chiaro e leggibile per Telegram.
+Formato Telegram (Markdown base): grassetto con UN solo asterisco *così* (mai due), elenchi con •,
+niente titoli #, niente tabelle, niente spazi dentro le parentesi.
+Importi scritti come €1234.56 (punto decimale, senza separatore delle migliaia), percentuali come 45%.
 """
 
 
@@ -999,6 +1002,26 @@ Testo: {user_text}"""
     return r.json()["choices"][0]["message"]["content"].strip().lower()
 
 
+def _tg_clean(text: str) -> str:
+    """Riporta l'output del modello (CommonMark) al Markdown base di Telegram e allinea i
+    numeri allo stile del resto del bot. gpt-oss ignora spesso le istruzioni di formato."""
+    t = text.replace(" ", " ").replace(" ", " ")
+    t = _re.sub(r"\*\*(.+?)\*\*", r"*\1*", t, flags=_re.S)             # **x** -> *x*
+    t = _re.sub(r"__(.+?)__", r"_\1_", t, flags=_re.S)
+    t = _re.sub(r"^[ \t]{0,3}#{1,6}[ \t]*(.+)$", r"*\1*", t, flags=_re.M)   # # titolo -> *titolo*
+    t = _re.sub(r"^[ \t]*\|?[ \t]*:?-{3,}[ \t|:\-]*$\n?", "", t, flags=_re.M)  # separatori di tabella
+    t = _re.sub(r"^[ \t]*\|(.+)\|[ \t]*$", lambda m: " · ".join(c.strip() for c in m.group(1).split("|")), t, flags=_re.M)
+    t = _re.sub(r"^([ \t]*)[-*][ \t]+", r"\1• ", t, flags=_re.M)            # elenchi uniformi
+    t = _re.sub(r"\(\s+(.+?)\s+\)", r"(\1)", t)                          # "( 12 % )" -> "(12 %)"
+    t = _re.sub(r"(\d)\s+%", r"\1%", t)
+    t = _re.sub(r"€\s?(\d{1,3}(?:[ .]\d{3})+)(,\d{1,2})?",
+                lambda m: "€" + _re.sub(r"[ .]", "", m.group(1)) + (m.group(2) or "").replace(",", "."), t)
+    t = _re.sub(r"€(\d+),(\d{1,2})\b", r"€\1.\2", t)                     # €644,53 -> €644.53
+    t = _re.sub(r"[ \t]+\n", "\n", t)
+    t = _re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
 async def ask_groq(user_text: str, context: str = "") -> str:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if context:
@@ -1013,4 +1036,4 @@ async def ask_groq(user_text: str, context: str = "") -> str:
         )
         if r.status_code != 200:
             return f"Errore nella risposta ({r.status_code}). Riprova."
-        return r.json()["choices"][0]["message"]["content"]
+        return _tg_clean(r.json()["choices"][0]["message"]["content"])
