@@ -366,7 +366,12 @@ async def route_message(user_text: str) -> str:
         "settimana prossima", "prossima settimana", "prossime settimane",
         "questo mese", "fine mese",
     ]
-    if any(w in text_lower for w in future_kw):
+    # "questo mese"/"fine mese" compaiono anche in domande sui soldi ("previsione fine mese",
+    # "come sto messo con le spese questo mese"): lì l'agenda non c'entra, cade sui rami finanza.
+    _money_q = any(w in text_lower for w in (
+        "spes", "speso", "budget", "soldi", "euro", "€", "previsione", "proiezione",
+        "flusso", "entrate", "uscite", "saldo", "patrimonio", "quanto", "bilancio", "risparm"))
+    if any(w in text_lower for w in future_kw) and not _money_q:
         days = 30 if "mese" in text_lower else 14
         events = await get_events(days_ahead=days)
         return format_events(events)
@@ -630,6 +635,10 @@ async def route_message(user_text: str) -> str:
         context = format_spending_summary(spending)
         if alerts:
             context += "\n\n" + format_alerts(alerts)
+        # Senza i budget reali il modello li inventa (visto: "€60" su tutte le categorie)
+        budgets = await get_category_budgets()
+        context += ("\n\nBudget mensili per categoria (usa SOLO questi valori, non inventarne): "
+                    + ", ".join(f"{c} €{b:.0f}" for c, b in budgets.items() if b > 0))
         return await ask_groq(user_text, context)
 
     # Azioni calendario (aggiungi / elimina / modifica)
