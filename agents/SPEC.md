@@ -154,4 +154,4 @@ Isybank è diventato un conto di passaggio: arriva lo stipendio, ~550-560€ (ra
 - Testato end-to-end su dati reali: 49 transazioni Revolut sincronizzate e categorizzate, top-up da 1212€ riconosciuto e taggato `Trasferimento` correttamente, spesa combinata per categoria verificata (Supermercati/Ristoranti/Trasporti da entrambi i conti).
 
 ## TODO aperti (segnalati, non risolti)
-- **`api/evening.py` è codice morto**: manda messaggi Telegram (budget alerts) ma `vercel.json` instrada TUTTO il traffico su `api/index.py` — nessuna route punta a `evening.py`, non è raggiungibile. Da decidere: rianimare come route dedicata, unire la logica in `index.py`, o rimuovere il file. Segnalato 2026-08-02, non toccato.
+- _(nessun TODO aperto)_ — `api/evening.py` e gli altri file legacy di giugno (morning/webhook/bot_local/scheduler_jobs/get_google_token/render.yaml) rimossi il 2026-10-09, non erano raggiungibili da nessuna route.
