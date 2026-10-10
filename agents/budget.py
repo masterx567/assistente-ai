@@ -606,7 +606,7 @@ async def check_subscription_reminders() -> list[str]:
     for s in subs:
         next_expected = date.fromisoformat(s["next_expected"])
         if 0 <= (next_expected - today).days <= 2:
-            messages.append(f"🔔 *{s['merchant']}* ~€{s['amount']:.2f} previsto circa il {next_expected.strftime('%d/%m')}.")
+            messages.append(f"🔔 *{_strip_md(s['merchant'])}* ~€{s['amount']:.2f} previsto circa il {next_expected.strftime('%d/%m')}.")
     return messages
 
 
@@ -628,7 +628,7 @@ def format_food_digest(digest: dict[str, dict]) -> str:
     lines = ["\n🍔 *Bar & fast-food ultimi 7 giorni*"]
     total = 0.0
     for merchant, d in sorted(digest.items(), key=lambda x: x[1]["total"], reverse=True):
-        lines.append(f"• {merchant} x{d['count']}: €{d['total']:.2f}")
+        lines.append(f"• {_strip_md(merchant)} x{d['count']}: €{d['total']:.2f}")
         total += d["total"]
     lines.append(f"_Totale piccole spese: €{total:.2f}_")
     return "\n".join(lines)

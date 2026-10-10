@@ -1,6 +1,8 @@
 import os
 import asyncio
 import json
+import re
+import html as _html
 import base64
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -70,23 +72,45 @@ def _chunk_text(text: str, limit: int = 4000) -> list[str]:
     return chunks
 
 
+def _md_to_html(text: str) -> str:
+    """Rete di sicurezza: stesso testo in HTML quando Telegram rifiuta il Markdown (un '*' o
+    '_' spaiato in un nome merchant/evento basta a farlo fallire). In HTML i caratteri
+    speciali sono testo letterale e i link [titolo](url) restano cliccabili, invece di
+    mandare l'intero messaggio in testo grezzo con URL chilometrici."""
+    stash: list[str] = []
+
+    def keep(fragment: str) -> str:
+        stash.append(fragment)
+        return f"\x00{len(stash) - 1}\x00"
+
+    t = re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)",
+               lambda m: keep(f'<a href="{_html.escape(m.group(2), quote=True)}">{_html.escape(m.group(1), quote=False)}</a>'), text)
+    t = re.sub(r"`([^`\n]+)`", lambda m: keep(f"<code>{_html.escape(m.group(1), quote=False)}</code>"), t)
+    t = _html.escape(t, quote=False)
+    t = re.sub(r"\*([^*\n]+)\*", r"<b>\1</b>", t)
+    t = re.sub(r"(?<![A-Za-z0-9])_([^_\n]+)_(?![A-Za-z0-9])", r"<i>\1</i>", t)
+    return re.sub(r"\x00(\d+)\x00", lambda m: stash[int(m.group(1))], t)
+
+
 def send_telegram(text: str, reply_markup: dict = None):
     """Manda un messaggio Telegram. Se supera 4096 caratteri lo spezza in più invii
-    (il limite dell'API), i bottoni (reply_markup) vanno solo sull'ultimo blocco."""
+    (il limite dell'API), i bottoni (reply_markup) vanno solo sull'ultimo blocco.
+    Ordine di tentativi per blocco: Markdown -> HTML (stesso testo, speciali neutralizzati)
+    -> testo semplice."""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     chunks = _chunk_text(text)
     with httpx.Client(timeout=9) as c:
         for i, chunk in enumerate(chunks):
             is_last = i == len(chunks) - 1
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "Markdown"}
-            if reply_markup and is_last:
-                payload["reply_markup"] = reply_markup
-            r = c.post(url, json=payload)
-            if not r.json().get("ok"):
-                plain = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk}
-                if reply_markup and is_last:
-                    plain["reply_markup"] = reply_markup
-                c.post(url, json=plain)
+            extra = {"reply_markup": reply_markup} if reply_markup and is_last else {}
+            r = c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "Markdown", **extra})
+            if r.json().get("ok"):
+                continue
+            r = c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": _md_to_html(chunk), "parse_mode": "HTML",
+                                  "disable_web_page_preview": True, **extra})
+            if r.json().get("ok"):
+                continue
+            c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": chunk, **extra})
 
 
 def send_telegram_photo(photo_bytes: bytes, caption: str = ""):
@@ -162,13 +186,16 @@ def edit_telegram_message(message_id: int, text: str, reply_markup: dict = None)
     payload = {"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id, "text": text, "parse_mode": "Markdown"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    extra = {"reply_markup": reply_markup} if reply_markup else {}
     with httpx.Client(timeout=9) as c:
         r = c.post(url, json=payload)
-        if not r.json().get("ok"):
-            plain = {"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id, "text": text}
-            if reply_markup:
-                plain["reply_markup"] = reply_markup
-            c.post(url, json=plain)
+        if r.json().get("ok"):
+            return
+        r = c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id, "text": _md_to_html(text),
+                              "parse_mode": "HTML", "disable_web_page_preview": True, **extra})
+        if r.json().get("ok"):
+            return
+        c.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id, "text": text, **extra})
 
 
 def get_access_token() -> str | None:
