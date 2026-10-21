@@ -10,6 +10,7 @@ from agents.calendar import get_events, get_events_in_range, format_events, add_
 from agents.reminders import add_reminder
 from agents.pending import save_pending, get_pending, clear_pending
 from agents.journal import add_journal_entry, get_journal_entries, format_journal_entries
+from agents.bootcamp import mark_lesson_done, next_lesson, progress as bootcamp_progress
 from agents.studio import mark_course_done, get_next_course, format_next_course_line, get_full_plan, format_study_plan, find_course_by_name
 from agents.travel import create_trip, get_active_trip, get_trip_spending, format_trip_budget, get_checklist, format_checklist, checklist_buttons, mark_checklist_item, add_checklist_item, delete_checklist_item, toggle_checklist_item, get_checklist_by_trip_of_item, get_trip_transactions, trip_transactions_buttons, delete_trip_transaction, delete_trip
 from agents.astronomy import get_tonight_sky, get_best_night
@@ -135,7 +136,8 @@ async def route_message(user_text: str) -> str:
             "• \"agenda oggi\", \"impegni domani\", \"eventi luglio\"\n"
             "• \"quando ho <nome>\" (cerca)\n\n"
             "🔔 *Promemoria*: \"ricordami di chiamare Luigi domani alle 9\"\n\n"
-            "🎓 *Studio*: \"piano esami\", \"esame SQL passato\"\n\n"
+            "🎓 *Studio*: \"piano esami\", \"esame SQL passato\"\n"
+            "📘 *Bootcamp Oracle*: \"bootcamp\", \"prossima lezione\", \"lezione GL-03 fatta\"\n\n"
             "✈️ *Viaggi*: /viaggio (crea), /checklist (mostra), \"aggiungi occhiali alla checklist\", "
             "\"fatto passaporto\", \"budget viaggio\", \"elimina viaggio\"\n\n"
             "📔 *Diario*: \"diario: ...\" per scrivere, \"diario di luglio\" per rileggere\n\n"
@@ -414,6 +416,16 @@ async def route_message(user_text: str) -> str:
     # Patrimonio netto
     if any(w in text_lower for w in ["patrimonio", "quanto vale il mio patrimonio", "net worth"]):
         return await get_net_worth()
+
+    # Bootcamp Oracle: "lezione GL-03 fatta", "prossima lezione", "bootcamp"
+    # — PRIMA del blocco esami, che matcha qualsiasi "<x> fatta".
+    _lesson = _re.search(r"lezione\s+([a-z]{2,5}-\d{2})\s+(?:fatt[ao]|finit[ao]|completat[ao])\b", text_lower)
+    if _lesson:
+        return await mark_lesson_done(_lesson.group(1))
+    if "prossima lezione" in text_lower:
+        return await next_lesson()
+    if "bootcamp" in text_lower:
+        return await bootcamp_progress()
 
     # Esame/corso segnato completato, dichiarato liberamente (non solo in risposta al prompt del bot)
     # — controllato PRIMA del display piano, altrimenti "esame" dentro "esame SQL passato"
