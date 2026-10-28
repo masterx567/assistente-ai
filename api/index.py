@@ -371,6 +371,45 @@ def portfolio_status():
     return resp
 
 
+CASA_ORIGIN = "https://casa-three-phi.vercel.app"
+CASA_KEY = os.getenv("CASA_KEY")
+
+
+@app.route("/api/casa", methods=["GET", "POST", "OPTIONS"])
+def casa_api():
+    """Backend dashboard casa: GET lista CasaItems, POST {id, fatto|importo|fase|data}.
+    Auth con ?k=CASA_KEY (link salvato sui telefoni D+J)."""
+    from agents.casa import casa_list, casa_update
+    if request.method == "OPTIONS":
+        resp = app.response_class(status=204)
+    elif not CASA_KEY or request.args.get("k") != CASA_KEY:
+        resp = jsonify({"error": "no"}); resp.status_code = 401
+    else:
+        try:
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                asyncio.run(casa_update(body["id"], body))
+                resp = jsonify({"ok": True})
+            else:
+                resp = jsonify(asyncio.run(casa_list()))
+        except Exception as e:
+            log_error(str(e), "casa_api")
+            resp = jsonify({"error": str(e)[:200]}); resp.status_code = 500
+    resp.headers["Access-Control-Allow-Origin"] = CASA_ORIGIN
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
+
+@app.route("/api/casa/sync")
+def casa_sync_now():
+    """Sync manuale scadenze casa -> Calendar (stesso lavoro del tick 08:00)."""
+    if not CASA_KEY or request.args.get("k") != CASA_KEY:
+        return jsonify({"error": "no"}), 401
+    from agents.casa import casa_sync
+    return jsonify({"synced": asyncio.run(casa_sync())})
+
+
 BRIEF_SECRET = os.getenv("BRIEF_SECRET")
 
 
@@ -427,6 +466,14 @@ def tick():
             return False
         asyncio.run(mark_ticked(key))
         return True
+
+    # 08:00 scadenze casa -> Google Calendar condiviso con J
+    if h == 8 and m <= 9 and _once(f"casa_sync:{now.date()}"):
+        try:
+            from agents.casa import casa_sync
+            done.append(f"casa_sync:{asyncio.run(casa_sync())}")
+        except Exception as e:
+            log_error(str(e), "casa_sync")
 
     # Blocco unico 09:00: streak + nuovo mese + reminder abbonamenti/BNPL/prestiti +
     # scadenza Enable Banking + briefing mattutino — un solo messaggio Telegram
