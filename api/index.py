@@ -379,7 +379,7 @@ CASA_KEY = os.getenv("CASA_KEY")
 def casa_api():
     """Backend dashboard casa: GET lista CasaItems, POST {id, fatto|importo|fase|data}.
     Auth con ?k=CASA_KEY (link salvato sui telefoni D+J)."""
-    from agents.casa import casa_list, casa_update
+    from agents.casa import casa_list, casa_update, casa_create, casa_archive
     if request.method == "OPTIONS":
         resp = app.response_class(status=204)
     elif not CASA_KEY or request.args.get("k") != CASA_KEY:
@@ -388,8 +388,14 @@ def casa_api():
         try:
             if request.method == "POST":
                 body = request.get_json(silent=True) or {}
-                asyncio.run(casa_update(body["id"], body))
-                resp = jsonify({"ok": True})
+                if body.get("nuovo"):
+                    resp = jsonify(asyncio.run(casa_create(body["nuovo"])))
+                elif body.get("archivia"):
+                    asyncio.run(casa_archive(body["archivia"]))
+                    resp = jsonify({"ok": True})
+                else:
+                    asyncio.run(casa_update(body["id"], body))
+                    resp = jsonify({"ok": True})
             else:
                 resp = jsonify(asyncio.run(casa_list()))
         except Exception as e:

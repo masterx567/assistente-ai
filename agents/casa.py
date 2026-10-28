@@ -3,7 +3,7 @@ Legge/scrive il DB Notion CasaItems e sincronizza scadenze/task sul Google Calen
 Vive qui per riusare NOTION_TOKEN e le credenziali Google del bot."""
 import os
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import httpx
 
 from agents.calendar import _get_access_token
@@ -67,24 +67,88 @@ async def casa_update(page_id: str, data: dict):
     if data.get("fase"):
         props["Fase"] = {"select": {"name": data["fase"]}}
     if "data" in data:
-        props["Data"] = {"date": {"start": data["data"]} if data["data"] else None}
+        props["Data"] = _date_prop(data["data"])
     async with httpx.AsyncClient(timeout=8) as c:
         r = await c.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"properties": props})
     if r.status_code >= 300:
         raise RuntimeError(r.text[:200])
 
 
+def _date_prop(v: str | None) -> dict:
+    """'2026-10-29' (giornata) o '2026-10-29T10:00' (con orario, ora di Roma)."""
+    if not v:
+        return {"date": None}
+    if "T" in v:
+        return {"date": {"start": v[:16] + ":00", "time_zone": "Europe/Rome"}}
+    return {"date": {"start": v[:10]}}
+
+
 def _event(i: dict) -> dict:
-    end = date.fromisoformat(i["data"][:10]) + timedelta(days=1)
-    return {
+    ev = {
         "summary": f"{'✅' if i['fatto'] else '🏠'} {i['nome']}" + (f" ({i['chi']})" if i["chi"] else ""),
         "description": i["note"],
-        "start": {"date": i["data"][:10]},
-        "end": {"date": end.isoformat()},
         "attendees": [{"email": e} for e in CASA_INVITE],
-        "reminders": {"useDefault": False, "overrides": [
-            {"method": "popup", "minutes": 3 * 24 * 60}, {"method": "popup", "minutes": 9 * 60}]},
     }
+    if "T" in i["data"]:
+        # Con orario: evento da 30 min, promemoria 1 ora e 10 minuti prima
+        start = datetime.fromisoformat(i["data"][:19])
+        fmt = "%Y-%m-%dT%H:%M:%S"
+        ev["start"] = {"dateTime": start.strftime(fmt), "timeZone": "Europe/Rome"}
+        ev["end"] = {"dateTime": (start + timedelta(minutes=30)).strftime(fmt), "timeZone": "Europe/Rome"}
+        ev["reminders"] = {"useDefault": False, "overrides": [
+            {"method": "popup", "minutes": 60}, {"method": "popup", "minutes": 10}]}
+    else:
+        # Giornata intera: Google conta i minuti dalla mezzanotte del giorno.
+        # 15h prima = 09:00 del giorno prima; 63h prima = 09:00 di 3 giorni prima.
+        d = date.fromisoformat(i["data"][:10])
+        ev["start"] = {"date": d.isoformat()}
+        ev["end"] = {"date": (d + timedelta(days=1)).isoformat()}
+        ev["reminders"] = {"useDefault": False, "overrides": [
+            {"method": "popup", "minutes": 15 * 60}, {"method": "popup", "minutes": 63 * 60}]}
+    return ev
+
+
+async def _push(c: httpx.AsyncClient, gh: dict, i: dict):
+    if i["calId"]:
+        await c.patch(f"{CAL}/{i['calId']}", params={"sendUpdates": "none"}, headers=gh, json=_event(i))
+        return
+    r = (await c.post(CAL, params={"sendUpdates": "all"}, headers=gh, json=_event(i))).json()
+    if "id" in r:
+        await c.patch(f"https://api.notion.com/v1/pages/{i['id']}", headers=HEADERS, json={
+            "properties": {"CalId": {"rich_text": [{"text": {"content": r["id"]}}]}}})
+
+
+async def casa_create(n: dict) -> dict:
+    """Nuova scadenza dalla dashboard: crea su Notion e la manda subito sul Calendar."""
+    nome = (n.get("nome") or "").strip()[:200]
+    if not nome:
+        raise ValueError("nome mancante")
+    props = {
+        "Nome": {"title": [{"text": {"content": nome}}]},
+        "Tipo": {"select": {"name": "Scadenza" if n.get("data") else "Task"}},
+        "Data": _date_prop(n.get("data")),
+    }
+    if n.get("fase"):
+        props["Fase"] = {"select": {"name": n["fase"]}}
+    if n.get("chi") in ("D", "J", "Entrambi"):
+        props["Chi"] = {"select": {"name": n["chi"]}}
+    async with httpx.AsyncClient(timeout=8) as c:
+        r = await c.post("https://api.notion.com/v1/pages", headers=HEADERS,
+                         json={"parent": {"database_id": CASA_DB}, "properties": props})
+        if r.status_code >= 300:
+            raise RuntimeError(r.text[:200])
+        item = _row(r.json())
+        if item["data"]:
+            token = await _get_access_token()
+            if token:
+                await _push(c, {"Authorization": f"Bearer {token}"}, item)
+    return item
+
+
+async def casa_archive(page_id: str):
+    """Annulla di una nuova voce: archivia su Notion (l'evento resta finché non si fa la sync)."""
+    async with httpx.AsyncClient(timeout=8) as c:
+        await c.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True})
 
 
 async def casa_sync() -> int:
@@ -94,16 +158,6 @@ async def casa_sync() -> int:
         raise RuntimeError("Google Calendar non configurato")
     items = [i for i in await casa_list() if i["tipo"] in ("Scadenza", "Task") and i["data"]]
     gh = {"Authorization": f"Bearer {token}"}
-
     async with httpx.AsyncClient(timeout=8) as c:
-        async def one(i):
-            if i["calId"]:
-                await c.patch(f"{CAL}/{i['calId']}", params={"sendUpdates": "none"}, headers=gh, json=_event(i))
-                return
-            r = (await c.post(CAL, params={"sendUpdates": "all"}, headers=gh, json=_event(i))).json()
-            if "id" in r:
-                await c.patch(f"https://api.notion.com/v1/pages/{i['id']}", headers=HEADERS, json={
-                    "properties": {"CalId": {"rich_text": [{"text": {"content": r["id"]}}]}}})
-
-        await asyncio.gather(*(one(i) for i in items))
+        await asyncio.gather(*(_push(c, gh, i) for i in items))
     return len(items)
