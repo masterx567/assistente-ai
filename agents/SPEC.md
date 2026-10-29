@@ -20,6 +20,7 @@ agents/
   errors.py      log errori su BotErrors DB Notion
   site_media.py    sostituzione PDF/foto su lineaverdeonline.com (allegato Telegram → WP REST)
   tracking.py      tracking pacchi via 17track.net (stesso DB Reminders, prefix PACCO:)
+  pipeline_github.py  bottoni ✅/🚀 della pipeline degli aggiornamenti → etichette GitHub (anche per lineaverde-ops)
   case.py          ricerca casa: annunci + stato funnel (stesso DB Reminders, prefix CASA:)
 ```
 
@@ -42,6 +43,7 @@ GOOGLE_CALENDAR_ICAL_URL
 WP_APP_USER  WP_APP_PASSWORD   # Application Password WP (wp_16605717) per site_media.py
 TRACK17_API_KEY   # 17track.net, tracking pacchi
 BRIEF_SECRET   # POST /brief, inoltro testo esterno su Telegram
+GH_PIPELINE_TOKEN   # token GitHub fine-grained di Daniele: bottoni gh:<ai|ops>:<scelta|rilascia>:N della pipeline degli aggiornamenti
 ```
 
 ## Endpoint esterni
@@ -155,3 +157,6 @@ Isybank è diventato un conto di passaggio: arriva lo stipendio, ~550-560€ (ra
 
 ## TODO aperti (segnalati, non risolti)
 - _(nessun TODO aperto)_ — `api/evening.py` e gli altri file legacy di giugno (morning/webhook/bot_local/scheduler_jobs/get_google_token/render.yaml) rimossi il 2026-10-09, non erano raggiungibili da nessuna route.
+
+## Pipeline degli aggiornamenti
+Vedi `.claude/context/pipeline-aggiornamenti.md`. Il webhook risponde `{"ok": true, "risposte": [...]}` con i testi mandati da `send_telegram` durante la richiesta: lo usano le prove `prove/prova_idea_N.py`.

@@ -1,0 +1,83 @@
+# Pipeline degli aggiornamenti, passo 5 (Daniele 2026-10-29, .claude/context/pipeline-aggiornamenti.md).
+# Daniele tocca 🚀 su Telegram (o mette l'etichetta "rilascia" sulla PR idea-<N> provata) → il ramo entra in main
+# (squash), deploy di produzione con VERCEL_TOKEN, controllo che risponda, tag vX.Y.Z, push, avviso a Daniele.
+# Mai senza l'etichetta messa da Daniele: è il suo ok (controllo sul proprietario del repo).
+name: Rilascio
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: rilascio
+  cancel-in-progress: false
+
+jobs:
+  rilascio:
+    if: github.event.label.name == 'rilascia' && startsWith(github.event.pull_request.head.ref, 'idea-') && github.event.sender.login == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RAMO: ${{ github.event.pull_request.head.ref }}
+      PR: ${{ github.event.pull_request.number }}
+      TITOLO: ${{ github.event.pull_request.title }}
+      BASE: main
+      SALUTE: https://assistente-ai-acu1.vercel.app/
+      VERCEL_ORG_ID: team_p0qbXtc8MabVcmNHvPQbBPUl
+      VERCEL_PROJECT_ID: prj_Krsy8IReKtwpkZW74QcsFfvubYuE
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE }}
+          fetch-depth: 0
+
+      - name: Ramo dentro main e versione
+        id: v
+        run: |
+          git config user.name "Pipeline aggiornamenti"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin "$RAMO"
+          git merge --squash "origin/$RAMO"
+          python3 .github/pipeline/versione.py "${RAMO#idea-}"
+
+      - name: Deploy di produzione e controllo
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx -y vercel deploy --prod --yes --token "$VERCEL_TOKEN" > /tmp/deploy.txt
+          tail -1 /tmp/deploy.txt
+          sleep 5
+          stato=$(curl -s -o /dev/null -w '%{http_code}' "$SALUTE")
+          echo "produzione risponde $stato"
+          [ "$stato" -lt 500 ]
+
+      - name: Commit, tag e push
+        env:
+          V: ${{ steps.v.outputs.versione }}
+        run: |
+          git commit -q -m "v$V: $TITOLO (Issue #${RAMO#idea-}, PR #$PR)"
+          git tag -a "v$V" -m "$TITOLO"
+          git push -q origin "$BASE" "v$V"
+          gh pr comment "$PR" --body "🏷 Rilasciata come v$V."
+          gh pr close "$PR" --delete-branch
+          gh issue close "${RAMO#idea-}" --comment "🏷 Rilasciata come v$V." || true
+
+      - name: Avviso a Daniele
+        if: always()
+        env:
+          V: ${{ steps.v.outputs.versione }}
+          COSA: ${{ steps.v.outputs.cosa }}
+          ESITO: ${{ job.status }}
+          LINK: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$ESITO" = success ]; then t="🏷 AssistenteAI v$V rilasciata: $COSA"; else t="❌ AssistenteAI: rilascio della PR #$PR fallito. Se il deploy non è partito la produzione non è cambiata. Dettagli: $LINK"; fi
+          curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -H "content-type: application/json" \
+            -d "$(jq -n --arg c "$TELEGRAM_CHAT_ID" --arg t "$t" '{chat_id:$c,text:$t}')" > /dev/null

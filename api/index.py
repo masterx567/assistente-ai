@@ -24,6 +24,7 @@ from agents.enable_banking import sync_transactions
 from agents.calendar import check_calendar_auth
 from agents.pending import save_pending, already_ticked, mark_ticked
 from agents.astronomy import get_sky_status_json
+from agents.pipeline_github import handle_pipeline_button
 
 app = Flask(__name__)
 
@@ -92,11 +93,17 @@ def _md_to_html(text: str) -> str:
     return re.sub(r"\x00(\d+)\x00", lambda m: stash[int(m.group(1))], t)
 
 
+# Testi mandati durante la richiesta al webhook: tornano nella risposta JSON, cosi' le prove della pipeline
+# degli aggiornamenti (prove/prova_idea_<N>.py) controllano cosa ha risposto il bot. Telegram ignora il corpo.
+_RISPOSTE: list[str] = []
+
+
 def send_telegram(text: str, reply_markup: dict = None):
     """Manda un messaggio Telegram. Se supera 4096 caratteri lo spezza in più invii
     (il limite dell'API), i bottoni (reply_markup) vanno solo sull'ultimo blocco.
     Ordine di tentativi per blocco: Markdown -> HTML (stesso testo, speciali neutralizzati)
     -> testo semplice."""
+    _RISPOSTE.append(text)
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     chunks = _chunk_text(text)
     with httpx.Client(timeout=9) as c:
@@ -270,6 +277,7 @@ def webhook():
     if not WEBHOOK_SECRET or request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
         return jsonify({"ok": False}), 403
     data = request.get_json(silent=True) or {}
+    _RISPOSTE.clear()
 
     # Gestione callback_query (tap su bottone inline, es. checklist viaggio)
     callback = data.get("callback_query")
@@ -293,6 +301,13 @@ def webhook():
             except Exception as e:
                 result = {"text": f"Errore: {str(e)}"}
             edit_telegram_message(cb_message_id, result["text"], result.get("markup"))
+        elif cb_chat_id == TELEGRAM_CHAT_ID and cb_data.startswith("gh:"):
+            # Pipeline degli aggiornamenti: ✅ scelta idea / 🚀 rilascio → etichetta su GitHub
+            result = handle_pipeline_button(cb_data, callback.get("message", {}).get("reply_markup"))
+            with httpx.Client(timeout=5) as c:
+                c.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/editMessageReplyMarkup",
+                       json={"chat_id": TELEGRAM_CHAT_ID, "message_id": cb_message_id, "reply_markup": result["markup"]})
+            send_telegram(result["text"])
         return jsonify({"ok": True})
 
     # Gestione messaggio normale
@@ -349,7 +364,7 @@ def webhook():
         else:
             send_telegram(reply)
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "risposte": _RISPOSTE})
 
 
 PORTFOLIO_ORIGIN = "https://daniele-acunzo.vercel.app"

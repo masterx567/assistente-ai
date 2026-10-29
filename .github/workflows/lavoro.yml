@@ -1,0 +1,213 @@
+# Pipeline degli aggiornamenti, passi 3 e 4 (Daniele 2026-10-29, .claude/context/pipeline-aggiornamenti.md).
+# Etichetta "scelta" su una Issue → Claude Code sviluppa l'idea sul ramo idea-<N> e apre la Pull Request →
+# anteprima Vercel e prova reale (messaggi finti dal chat di Daniele all'anteprima) → se fallisce Claude corregge
+# (massimo 2 volte) → messaggio a Daniele con il bottone 🚀. Lavoro grande: solo piano nella Issue.
+# Tutto in un solo job: i push fatti con GITHUB_TOKEN non fanno partire altri workflow.
+# Repo PUBBLICO: la stampa della prova resta in dossier/ (mai artefatti), nel log esce solo "x/y".
+name: Lavoro
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: lavoro-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  N: ${{ github.event.issue.number }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PROGETTO: ai
+  VERCEL_ORG_ID: team_p0qbXtc8MabVcmNHvPQbBPUl
+  VERCEL_PROJECT_ID: prj_Krsy8IReKtwpkZW74QcsFfvubYuE
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  # per la prova sull'anteprima
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+  WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+  NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+
+jobs:
+  lavoro:
+    if: github.event.label.name == 'scelta'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Messaggio a Daniele (funzione)
+        run: |
+          cat > /tmp/tg.sh <<'EOF'
+          curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "content-type: application/json" \
+            -d "$(jq -n --arg c "$TELEGRAM_CHAT_ID" --arg t "$1" --argjson k "${2:-null}" '{chat_id:$c,text:$t,link_preview_options:{is_disabled:true}} + (if $k then {reply_markup:$k} else {} end)')" > /dev/null
+          EOF
+          chmod +x /tmp/tg.sh
+
+      - name: Che lavoro è
+        id: tipo
+        env:
+          ETICHETTE: ${{ toJSON(github.event.issue.labels.*.name) }}
+        run: |
+          if echo "$ETICHETTE" | grep -q '"con Daniele"'; then
+            gh issue comment "$N" --body "🤝 Questa idea tocca credenziali, Vercel o dati veri: la pipeline non la sviluppa. Si fa insieme a Daniele in una sessione."
+            echo "modo=stop" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if echo "$ETICHETTE" | grep -q '"lavoro: grande"'; then echo "modo=piano" >> "$GITHUB_OUTPUT"; exit 0; fi
+          aperte=$(gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("idea-"))] | length')
+          if [ "$aperte" -ge 3 ]; then
+            gh issue comment "$N" --body "⏸ Ci sono già $aperte idee in lavoro (massimo 3). Togli e rimetti l'etichetta «scelta» quando una è rilasciata o chiusa."
+            /tmp/tg.sh "⏸ AssistenteAI, idea #$N non partita: già $aperte idee in lavoro (massimo 3)."
+            echo "modo=stop" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "modo=codice" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: steps.tipo.outputs.modo != 'stop'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dipendenze, Issue e ramo
+        if: steps.tipo.outputs.modo != 'stop'
+        run: |
+          pip install -q -r requirements.txt
+          mkdir -p dossier
+          gh issue view "$N" --json title,body --jq '"# " + .title + "\n\n" + .body' > dossier/issue.md
+          git config user.name "Pipeline aggiornamenti"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "idea-$N"
+
+      - name: Claude scrive il piano (lavoro grande)
+        if: steps.tipo.outputs.modo == 'piano'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: >-
+            Issue ${{ env.N }}, lavoro grande. Leggi CLAUDE.md, agents/SPEC.md, dossier/issue.md e il codice coinvolto.
+            Non scrivere codice. Scrivi solo dossier/piano.md: il piano in passi piccoli, ognuno rilasciabile da solo
+            (file, cosa cambia, come si prova, rischi). Italiano semplice. Repo pubblico: niente dati personali.
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Read,Glob,Grep,Write"
+
+      - name: Piano nella Issue
+        if: steps.tipo.outputs.modo == 'piano'
+        run: |
+          gh issue comment "$N" --body-file dossier/piano.md
+          /tmp/tg.sh "🔴 AssistenteAI, idea #$N è un lavoro grande: niente codice, il piano è nella Issue. ${{ github.event.issue.html_url }}"
+
+      - name: Claude sviluppa l'idea
+        if: steps.tipo.outputs.modo == 'codice'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: "Issue ${{ env.N }}. Leggi .github/prompts/lavoro.md e segui le istruzioni."
+          claude_args: >-
+            --max-turns 120
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(python3 -m py_compile:*)"
+
+      - name: Commit, push e Pull Request
+        id: pr
+        if: steps.tipo.outputs.modo == 'codice'
+        run: |
+          if [ -f dossier/blocco.md ]; then
+            gh issue comment "$N" --body-file dossier/blocco.md
+            /tmp/tg.sh "🤝 AssistenteAI, idea #$N: Claude si è fermato, serve Daniele. Motivo nella Issue. ${{ github.event.issue.html_url }}"
+            echo "fatto=no" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          test -f "prove/idea_$N.json" || { echo "manca la voce prove/idea_$N.json"; exit 1; }
+          python3 -m compileall -q -x 'dossier|\.github' .
+          git add -A
+          git commit -q -m "Idea #$N: ${{ github.event.issue.title }}"
+          git push -f -q origin "idea-$N"
+          url=$(gh pr view "idea-$N" --json url --jq .url 2>/dev/null || gh pr create --head "idea-$N" --title "${{ github.event.issue.title }}" \
+            --body "Sviluppo automatico della Issue #$N (pipeline degli aggiornamenti). Esito della prova nei commenti. Per rilasciare: etichetta «rilascia».")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "fatto=si" >> "$GITHUB_OUTPUT"
+
+      # Prova sull'anteprima: fino a 3 giri (1 + 2 nuovi tentativi). Ogni giro fallito → Claude corregge → push.
+      - name: Prova 1
+        id: p1
+        if: steps.pr.outputs.fatto == 'si'
+        continue-on-error: true
+        run: python3 .github/pipeline/anteprima.py "$N"
+
+      - name: Claude corregge (1)
+        if: steps.pr.outputs.fatto == 'si' && steps.p1.outputs.esito != 'ok'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: "Issue ${{ env.N }}, correggi. Leggi .github/prompts/lavoro.md e dossier/prova-${{ env.N }}.log."
+          claude_args: >-
+            --max-turns 80
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(python3 -m py_compile:*)"
+
+      - name: Prova 2
+        id: p2
+        if: steps.pr.outputs.fatto == 'si' && steps.p1.outputs.esito != 'ok'
+        continue-on-error: true
+        run: |
+          git add -A && git commit -q -m "Idea #$N: correzione 1 dopo la prova" && git push -q origin "idea-$N" || true
+          python3 .github/pipeline/anteprima.py "$N"
+
+      - name: Claude corregge (2)
+        if: steps.pr.outputs.fatto == 'si' && steps.p1.outputs.esito != 'ok' && steps.p2.outputs.esito != 'ok'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: "Issue ${{ env.N }}, correggi. Leggi .github/prompts/lavoro.md e dossier/prova-${{ env.N }}.log."
+          claude_args: >-
+            --max-turns 80
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(python3 -m py_compile:*)"
+
+      - name: Prova 3
+        id: p3
+        if: steps.pr.outputs.fatto == 'si' && steps.p1.outputs.esito != 'ok' && steps.p2.outputs.esito != 'ok'
+        continue-on-error: true
+        run: |
+          git add -A && git commit -q -m "Idea #$N: correzione 2 dopo la prova" && git push -q origin "idea-$N" || true
+          python3 .github/pipeline/anteprima.py "$N"
+
+      - name: Esito a Daniele
+        if: steps.pr.outputs.fatto == 'si'
+        env:
+          E1: ${{ steps.p1.outputs.esito }}
+          E2: ${{ steps.p2.outputs.esito }}
+          E3: ${{ steps.p3.outputs.esito }}
+          R: ${{ steps.p3.outputs.risultato || steps.p2.outputs.risultato || steps.p1.outputs.risultato }}
+          ANTEPRIMA: ${{ steps.p3.outputs.url || steps.p2.outputs.url || steps.p1.outputs.url }}
+          PR: ${{ steps.pr.outputs.url }}
+          TITOLO: ${{ github.event.issue.title }}
+        run: |
+          giri=1; [ -n "$E2" ] && giri=2; [ -n "$E3" ] && giri=3; export giri
+          if [ "$E1" = ok ] || [ "$E2" = ok ] || [ "$E3" = ok ]; then
+            # La verifica della voce è il risultato vero della prova
+            python3 - <<'EOF'
+          import json, os
+          f = f"prove/idea_{os.environ['N']}.json"
+          v = json.load(open(f, encoding="utf-8"))
+          v["verifica"] = f"Prova automatica sull'anteprima {os.environ['ANTEPRIMA']}: {os.environ['R'].replace('/', ' su ')} riusciti (prove/prova_idea_{os.environ['N']}.py, giro {os.environ['giri']} di 3)."
+          json.dump(v, open(f, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+          EOF
+            git add -A && git commit -q -m "Idea #$N: verifica della prova" && git push -q origin "idea-$N"
+            gh pr comment "$PR" --body "🧪 Provato sull'anteprima: $R ✅ (giro $giri di 3). Per rilasciare: etichetta «rilascia» o 🚀 su Telegram."
+            /tmp/tg.sh "🧪 AssistenteAI, idea #$N «$TITOLO»: provato, ${R/\// su } ✅. Rilascio?
+          $PR" "{\"inline_keyboard\":[[{\"text\":\"🚀 Rilascia\",\"callback_data\":\"gh:$PROGETTO:rilascia:${PR##*/}\"}]]}"
+          else
+            gh pr comment "$PR" --body "❌ Prova fallita 3 volte ($R). Mi fermo: serve Daniele."
+            /tmp/tg.sh "❌ AssistenteAI, idea #$N «$TITOLO»: la prova fallisce anche dopo 2 correzioni ($R). Mi fermo.
+          $PR"
+          fi
+        shell: bash
