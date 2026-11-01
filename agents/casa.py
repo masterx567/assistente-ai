@@ -68,6 +68,10 @@ async def casa_update(page_id: str, data: dict):
         props["Fase"] = {"select": {"name": data["fase"]}}
     if "data" in data:
         props["Data"] = _date_prop(data["data"])
+    if isinstance(data.get("note"), str):
+        # Notion: max 2000 caratteri per blocco di testo, quindi spezzo (serve per il layout mobili in JSON)
+        t = data["note"][:40000]
+        props["Note"] = {"rich_text": [{"text": {"content": t[i:i + 2000]}} for i in range(0, len(t), 2000)]}
     async with httpx.AsyncClient(timeout=8) as c:
         r = await c.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"properties": props})
     if r.status_code >= 300:
