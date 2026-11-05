@@ -498,9 +498,19 @@ def tick():
 
     # Blocco unico 09:00: streak + nuovo mese + reminder abbonamenti/BNPL/prestiti +
     # scadenza Enable Banking + briefing mattutino — un solo messaggio Telegram
-    if h == 9 and m <= 4 and _once(f"morning9:{now.date()}"):
-        briefing = asyncio.run(get_morning_briefing())
-        parts = [briefing]
+    # La chiave si segna solo dopo l'invio: un pezzo che fallisce non blocca gli altri,
+    # e se fallisce l'invio il tick successivo (entro le 9:04) riprova.
+    morning_key = f"morning9:{now.date()}"
+    if h == 9 and m <= 4 and not asyncio.run(already_ticked(morning_key)):
+        def _safe(fn, label, default):
+            try:
+                return asyncio.run(fn())
+            except Exception as e:
+                log_error(str(e), label)
+                return default
+
+        briefing = _safe(get_morning_briefing, "morning9_briefing", None)
+        parts = [briefing] if briefing else []
 
         if now.day == 1:
             mese = mese_anno_it(now)
@@ -508,22 +518,22 @@ def tick():
 
         reminder_lines = []
 
-        sub_msgs = asyncio.run(check_subscription_reminders())
+        sub_msgs = _safe(check_subscription_reminders, "morning9_sub", [])
         reminder_lines.extend(sub_msgs)
         if sub_msgs:
             done.append(f"sub_reminders:{len(sub_msgs)}")
 
-        bnpl_msgs = asyncio.run(check_commitment_reminders())
+        bnpl_msgs = _safe(check_commitment_reminders, "morning9_bnpl", [])
         reminder_lines.extend(bnpl_msgs)
         if bnpl_msgs:
             done.append(f"bnpl_reminders:{len(bnpl_msgs)}")
 
-        loan_msgs = asyncio.run(check_loan_reminders())
+        loan_msgs = _safe(check_loan_reminders, "morning9_loan", [])
         reminder_lines.extend(loan_msgs)
         if loan_msgs:
             done.append(f"loan_reminders:{len(loan_msgs)}")
 
-        gc_error = asyncio.run(check_calendar_auth())
+        gc_error = _safe(check_calendar_auth, "morning9_gc", None)
         if gc_error:
             reminder_lines.append(
                 f"⚠️ *Google Calendar* non funziona — token revocato/scaduto ({gc_error}).\n"
@@ -534,8 +544,15 @@ def tick():
         if reminder_lines:
             parts.append("🔔 *PROMEMORIA*\n\n" + "\n\n".join(reminder_lines))
 
-        send_telegram("\n\n━━━━━━━━━━━━━━━\n\n".join(parts))
-        done.append("morning9")
+        if not parts:
+            parts.append("Buongiorno! Briefing non disponibile oggi (errore registrato).")
+
+        try:
+            send_telegram("\n\n━━━━━━━━━━━━━━━\n\n".join(parts))
+            asyncio.run(mark_ticked(morning_key))
+            done.append("morning9")
+        except Exception as e:
+            log_error(str(e), "morning9_send")
 
     # Budget serale: 20:00 esatto
     if h == 20 and m <= 4 and _once(f"evening:{now.date()}"):
