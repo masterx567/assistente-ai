@@ -404,9 +404,10 @@ async def route_message(user_text: str) -> str:
         "rate klarna", "rate scalapay", "pagamenti a rate", "quante rate",
         "rate rimanenti", "rate rimaste", "quanto manca alle rate",
         "rate attive", "rate in corso", "le mie rate", "mie rate",
-        "rate da pagare", "rate aperte", "rate", "bnpl",
+        "rate da pagare", "rate aperte", "bnpl",
     ]
-    if any(w in text_lower for w in amortization_kw):
+    # "rate" da sola solo come parola intera: altrimenti matcha "strategy", "pirate", ecc.
+    if any(w in text_lower for w in amortization_kw) or _re.search(r"\brate\b", text_lower):
         return await get_amortization_table()
 
     # Andamento patrimonio nel tempo (controlla PRIMA di "patrimonio" generico)
