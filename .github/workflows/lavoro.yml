@@ -36,7 +36,9 @@ env:
 
 jobs:
   lavoro:
-    if: github.event.label.name == 'scelta'
+    # Sicurezza (audit 2026-11-19): repo pubblico, quindi solo Issue aperte da Daniele.
+    # Il testo di un'Issue di altri potrebbe contenere istruzioni per Claude (prompt injection).
+    if: github.event.label.name == 'scelta' && github.event.issue.user.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -119,6 +121,8 @@ jobs:
       - name: Commit, push e Pull Request
         id: pr
         if: steps.tipo.outputs.modo == 'codice'
+        env:
+          TITOLO: ${{ github.event.issue.title }}  # via env, mai ${{ }} dentro run: (script injection)
         run: |
           if [ -f dossier/blocco.md ]; then
             gh issue comment "$N" --body-file dossier/blocco.md
@@ -128,9 +132,9 @@ jobs:
           test -f "prove/idea_$N.json" || { echo "manca la voce prove/idea_$N.json"; exit 1; }
           python3 -m compileall -q -x 'dossier|\.github' .
           git add -A
-          git commit -q -m "Idea #$N: ${{ github.event.issue.title }}"
+          git commit -q -m "Idea #$N: $TITOLO"
           git push -f -q origin "idea-$N"
-          url=$(gh pr view "idea-$N" --json url --jq .url 2>/dev/null || gh pr create --head "idea-$N" --title "${{ github.event.issue.title }}" \
+          url=$(gh pr view "idea-$N" --json url --jq .url 2>/dev/null || gh pr create --head "idea-$N" --title "$TITOLO" \
             --body "Sviluppo automatico della Issue #$N (pipeline degli aggiornamenti). Esito della prova nei commenti. Per rilasciare: etichetta «rilascia».")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "fatto=si" >> "$GITHUB_OUTPUT"

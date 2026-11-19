@@ -41,7 +41,12 @@ if not os.path.exists(prova):
 
 os.makedirs("dossier", exist_ok=True)
 try:
-    p = subprocess.run([sys.executable, prova], capture_output=True, text=True, timeout=15 * 60, env={**os.environ, "BASE_URL": url})
+    # La prova è codice scritto da Claude: gira solo con le variabili che le servono, senza VERCEL_TOKEN,
+    # TELEGRAM_BOT_TOKEN, GH_TOKEN o i token di GitHub Actions (audit sicurezza 2026-11-19).
+    serve = ("PATH", "HOME", "LANG", "SYSTEMROOT", "TEMP", "TMP", "WEBHOOK_SECRET", "TELEGRAM_CHAT_ID",
+             "VERCEL_AUTOMATION_BYPASS_SECRET", "NOTION_TOKEN")
+    env = {k: os.environ[k] for k in serve if k in os.environ} | {"BASE_URL": url}
+    p = subprocess.run([sys.executable, prova], capture_output=True, text=True, timeout=15 * 60, env=env)
     stampa, ok = p.stdout + "\n" + p.stderr, p.returncode == 0
 except subprocess.TimeoutExpired as e:
     stampa, ok = f"{e.stdout or ''}\nprova interrotta dopo 15 minuti", False
